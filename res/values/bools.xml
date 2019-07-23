@@ -17,6 +17,8 @@
 -->
 
 <resources>
+    <bool name="allow_swipe_down_clearall">false</bool>
+
     <bool name="notification_badging_enabled">false</bool>
 
     <bool name="enable_install_shortcut_api">true</bool>
