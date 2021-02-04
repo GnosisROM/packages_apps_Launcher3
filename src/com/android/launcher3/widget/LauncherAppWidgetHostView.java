@@ -16,20 +16,15 @@
 
 package com.android.launcher3.widget;
 
-import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.Context;
 import android.content.res.Configuration;
-import android.graphics.PointF;
-import android.graphics.Rect;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.util.SparseBooleanArray;
-import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewConfiguration;
 import android.view.ViewDebug;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -38,23 +33,21 @@ import android.widget.Advanceable;
 import android.widget.RemoteViews;
 
 import com.android.launcher3.CheckLongPressHelper;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
-import com.android.launcher3.LauncherAppWidgetInfo;
 import com.android.launcher3.LauncherAppWidgetProviderInfo;
 import com.android.launcher3.R;
-import com.android.launcher3.SimpleOnStylusPressListener;
-import com.android.launcher3.StylusEventHelper;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.dragndrop.DragLayer;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.LauncherAppWidgetInfo;
+import com.android.launcher3.util.Executors;
+import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.BaseDragLayer.TouchCompleteListener;
-
-import java.util.ArrayList;
 
 /**
  * {@inheritDoc}
  */
-public class LauncherAppWidgetHostView extends AppWidgetHostView
+public class LauncherAppWidgetHostView extends NavigableAppWidgetHostView
         implements TouchCompleteListener, View.OnLongClickListener {
 
     // Related to the auto-advancing of widgets
@@ -67,43 +60,31 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView
     protected final LayoutInflater mInflater;
 
     private final CheckLongPressHelper mLongPressHelper;
-    private final StylusEventHelper mStylusEventHelper;
     protected final Launcher mLauncher;
 
     @ViewDebug.ExportedProperty(category = "launcher")
     private boolean mReinflateOnConfigChange;
-
-    private float mSlop;
-
-    @ViewDebug.ExportedProperty(category = "launcher")
-    private boolean mChildrenFocused;
 
     private boolean mIsScrollable;
     private boolean mIsAttachedToWindow;
     private boolean mIsAutoAdvanceRegistered;
     private Runnable mAutoAdvanceRunnable;
 
-    /**
-     * The scaleX and scaleY value such that the widget fits within its cellspans, scaleX = scaleY.
-     */
-    private float mScaleToFit = 1f;
 
-    /**
-     * The translation values to center the widget within its cellspans.
-     */
-    private final PointF mTranslationForCentering = new PointF(0, 0);
 
     public LauncherAppWidgetHostView(Context context) {
         super(context);
         mLauncher = Launcher.getLauncher(context);
         mLongPressHelper = new CheckLongPressHelper(this, this);
-        mStylusEventHelper = new StylusEventHelper(new SimpleOnStylusPressListener(this), this);
         mInflater = LayoutInflater.from(context);
         setAccessibilityDelegate(mLauncher.getAccessibilityDelegate());
         setBackgroundResource(R.drawable.widget_internal_focus_bg);
 
         if (Utilities.ATLEAST_OREO) {
-            setExecutor(Utilities.THREAD_POOL_EXECUTOR);
+            setExecutor(Executors.THREAD_POOL_EXECUTOR);
+        }
+        if (Utilities.ATLEAST_Q && Themes.getAttrBoolean(mLauncher, R.attr.isWorkspaceDarkText)) {
+            setOnLightBackground(true);
         }
     }
 
@@ -158,75 +139,26 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView
     }
 
     public boolean onInterceptTouchEvent(MotionEvent ev) {
-        // Just in case the previous long press hasn't been cleared, we make sure to start fresh
-        // on touch down.
         if (ev.getAction() == MotionEvent.ACTION_DOWN) {
-            mLongPressHelper.cancelLongPress();
-        }
-
-        // Consume any touch events for ourselves after longpress is triggered
-        if (mLongPressHelper.hasPerformedLongPress()) {
-            mLongPressHelper.cancelLongPress();
-            return true;
-        }
-
-        // Watch for longpress or stylus button press events at this level to
-        // make sure users can always pick up this widget
-        if (mStylusEventHelper.onMotionEvent(ev)) {
-            mLongPressHelper.cancelLongPress();
-            return true;
-        }
-
-        switch (ev.getAction()) {
-            case MotionEvent.ACTION_DOWN: {
-                DragLayer dragLayer = Launcher.getLauncher(getContext()).getDragLayer();
-
-                if (mIsScrollable) {
-                     dragLayer.requestDisallowInterceptTouchEvent(true);
-                }
-                if (!mStylusEventHelper.inStylusButtonPressed()) {
-                    mLongPressHelper.postCheckForLongPress();
-                }
-                dragLayer.setTouchCompleteListener(this);
-                break;
+            DragLayer dragLayer = Launcher.getLauncher(getContext()).getDragLayer();
+            if (mIsScrollable) {
+                dragLayer.requestDisallowInterceptTouchEvent(true);
             }
-
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                mLongPressHelper.cancelLongPress();
-                break;
-            case MotionEvent.ACTION_MOVE:
-                if (!Utilities.pointInView(this, ev.getX(), ev.getY(), mSlop)) {
-                    mLongPressHelper.cancelLongPress();
-                }
-                break;
+            dragLayer.setTouchCompleteListener(this);
         }
-
-        // Otherwise continue letting touch events fall through to children
-        return false;
+        mLongPressHelper.onTouchEvent(ev);
+        return mLongPressHelper.hasPerformedLongPress();
     }
 
     public boolean onTouchEvent(MotionEvent ev) {
-        // If the widget does not handle touch, then cancel
-        // long press when we release the touch
-        switch (ev.getAction()) {
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                mLongPressHelper.cancelLongPress();
-                break;
-            case MotionEvent.ACTION_MOVE:
-                if (!Utilities.pointInView(this, ev.getX(), ev.getY(), mSlop)) {
-                    mLongPressHelper.cancelLongPress();
-                }
-                break;
-        }
-        return false;
+        mLongPressHelper.onTouchEvent(ev);
+        // We want to keep receiving though events to be able to cancel long press on ACTION_UP
+        return true;
     }
 
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        mSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
 
         mIsAttachedToWindow = true;
         checkIfAutoAdvance();
@@ -265,98 +197,6 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView
             // we still may be receiving a touch up which we want to intercept
             mLongPressHelper.cancelLongPress();
         }
-    }
-
-    @Override
-    public int getDescendantFocusability() {
-        return mChildrenFocused ? ViewGroup.FOCUS_BEFORE_DESCENDANTS
-                : ViewGroup.FOCUS_BLOCK_DESCENDANTS;
-    }
-
-    @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        if (mChildrenFocused && event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE
-                && event.getAction() == KeyEvent.ACTION_UP) {
-            mChildrenFocused = false;
-            requestFocus();
-            return true;
-        }
-        return super.dispatchKeyEvent(event);
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (!mChildrenFocused && keyCode == KeyEvent.KEYCODE_ENTER) {
-            event.startTracking();
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (event.isTracking()) {
-            if (!mChildrenFocused && keyCode == KeyEvent.KEYCODE_ENTER) {
-                mChildrenFocused = true;
-                ArrayList<View> focusableChildren = getFocusables(FOCUS_FORWARD);
-                focusableChildren.remove(this);
-                int childrenCount = focusableChildren.size();
-                switch (childrenCount) {
-                    case 0:
-                        mChildrenFocused = false;
-                        break;
-                    case 1: {
-                        if (getTag() instanceof ItemInfo) {
-                            ItemInfo item = (ItemInfo) getTag();
-                            if (item.spanX == 1 && item.spanY == 1) {
-                                focusableChildren.get(0).performClick();
-                                mChildrenFocused = false;
-                                return true;
-                            }
-                        }
-                        // continue;
-                    }
-                    default:
-                        focusableChildren.get(0).requestFocus();
-                        return true;
-                }
-            }
-        }
-        return super.onKeyUp(keyCode, event);
-    }
-
-    @Override
-    protected void onFocusChanged(boolean gainFocus, int direction, Rect previouslyFocusedRect) {
-        if (gainFocus) {
-            mChildrenFocused = false;
-            dispatchChildFocus(false);
-        }
-        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
-    }
-
-    @Override
-    public void requestChildFocus(View child, View focused) {
-        super.requestChildFocus(child, focused);
-        dispatchChildFocus(mChildrenFocused && focused != null);
-        if (focused != null) {
-            focused.setFocusableInTouchMode(false);
-        }
-    }
-
-    @Override
-    public void clearChildFocus(View child) {
-        super.clearChildFocus(child);
-        dispatchChildFocus(false);
-    }
-
-    @Override
-    public boolean dispatchUnhandledMove(View focused, int direction) {
-        return mChildrenFocused;
-    }
-
-    private void dispatchChildFocus(boolean childIsFocused) {
-        // The host view's background changes when selected, to indicate the focus is inside.
-        setSelected(childIsFocused);
     }
 
     public void switchToErrorView() {
@@ -427,12 +267,7 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView
         if (shouldRegisterAutoAdvance != mIsAutoAdvanceRegistered) {
             mIsAutoAdvanceRegistered = shouldRegisterAutoAdvance;
             if (mAutoAdvanceRunnable == null) {
-                mAutoAdvanceRunnable = new Runnable() {
-                    @Override
-                    public void run() {
-                        runAutoAdvance();
-                    }
-                };
+                mAutoAdvanceRunnable = this::runAutoAdvance;
             }
 
             handler.removeCallbacks(mAutoAdvanceRunnable);
@@ -461,26 +296,6 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView
         scheduleNextAdvance();
     }
 
-    public void setScaleToFit(float scale) {
-        mScaleToFit = scale;
-        setScaleX(scale);
-        setScaleY(scale);
-    }
-
-    public float getScaleToFit() {
-        return mScaleToFit;
-    }
-
-    public void setTranslationForCentering(float x, float y) {
-        mTranslationForCentering.set(x, y);
-        setTranslationX(x);
-        setTranslationY(y);
-    }
-
-    public PointF getTranslationForCentering() {
-        return mTranslationForCentering;
-    }
-
     @Override
     protected void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -501,5 +316,14 @@ public class LauncherAppWidgetHostView extends AppWidgetHostView
         // orientation), but don't delete it from the database
         mLauncher.removeItem(this, info, false  /* deleteFromDb */);
         mLauncher.bindAppWidget(info);
+    }
+
+    @Override
+    protected boolean shouldAllowDirectClick() {
+        if (getTag() instanceof ItemInfo) {
+            ItemInfo item = (ItemInfo) getTag();
+            return item.spanX == 1 && item.spanY == 1;
+        }
+        return false;
     }
 }

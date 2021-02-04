@@ -33,6 +33,7 @@ import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.util.AttributeSet;
+import android.util.Property;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -45,6 +46,7 @@ import com.android.launcher3.dragndrop.DragController;
 import com.android.launcher3.dragndrop.DragLayer;
 import com.android.launcher3.dragndrop.DragOptions;
 import com.android.launcher3.dragndrop.DragView;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Target;
 import com.android.launcher3.util.Themes;
 import com.android.launcher3.util.Thunk;
@@ -54,6 +56,20 @@ import com.android.launcher3.util.Thunk;
  */
 public abstract class ButtonDropTarget extends TextView
         implements DropTarget, DragController.DragListener, OnClickListener {
+
+    private static final Property<ButtonDropTarget, Integer> TEXT_COLOR =
+            new Property<ButtonDropTarget, Integer>(Integer.TYPE, "textColor") {
+
+                @Override
+                public Integer get(ButtonDropTarget target) {
+                    return target.getTextColor();
+                }
+
+                @Override
+                public void set(ButtonDropTarget target, Integer value) {
+                    target.setTextColor(value);
+                }
+            };
 
     private static final int[] sTempCords = new int[2];
     private static final int DRAG_VIEW_DROP_DURATION = 285;
@@ -140,7 +156,7 @@ public abstract class ButtonDropTarget extends TextView
 
     @Override
     public final void onDragEnter(DragObject d) {
-        if (!d.accessibleDrag && !mTextVisible) {
+        if (!mAccessibleDrag && !mTextVisible) {
             // Show tooltip
             hideTooltip();
 
@@ -206,7 +222,7 @@ public abstract class ButtonDropTarget extends TextView
         });
 
         mCurrentColorAnim.play(anim1);
-        mCurrentColorAnim.play(ObjectAnimator.ofArgb(this, "textColor", targetColor));
+        mCurrentColorAnim.play(ObjectAnimator.ofArgb(this, TEXT_COLOR, targetColor));
         mCurrentColorAnim.start();
     }
 
@@ -264,6 +280,10 @@ public abstract class ButtonDropTarget extends TextView
      */
     @Override
     public void onDrop(final DragObject d, final DragOptions options) {
+        if (options.isFlingToDelete) {
+            // FlingAnimation handles the animation and then calls completeDrop().
+            return;
+        }
         final DragLayer dragLayer = mLauncher.getDragLayer();
         final Rect from = new Rect();
         dragLayer.getViewRectRelativeToSelf(d.dragView, from);

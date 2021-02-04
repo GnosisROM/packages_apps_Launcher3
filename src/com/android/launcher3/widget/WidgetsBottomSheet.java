@@ -16,24 +16,28 @@
 
 package com.android.launcher3.widget;
 
+import static com.android.launcher3.anim.Interpolators.FAST_OUT_SLOW_IN;
+
 import android.animation.PropertyValuesHolder;
 import android.content.Context;
 import android.graphics.Rect;
 import android.util.AttributeSet;
+import android.util.IntProperty;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.Interpolator;
 import android.widget.TextView;
 
 import com.android.launcher3.Insettable;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.R;
-import com.android.launcher3.Utilities;
-import com.android.launcher3.anim.Interpolators;
+import com.android.launcher3.ResourceUtils;
+import com.android.launcher3.anim.PendingAnimation;
 import com.android.launcher3.model.WidgetItem;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.util.PackageUserKey;
 
 import java.util.List;
@@ -42,6 +46,20 @@ import java.util.List;
  * Bottom sheet for the "Widgets" system shortcut in the long-press popup.
  */
 public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
+
+    private static final IntProperty<View> PADDING_BOTTOM =
+            new IntProperty<View>("paddingBottom") {
+                @Override
+                public void setValue(View view, int paddingBottom) {
+                    view.setPadding(view.getPaddingLeft(), view.getPaddingTop(),
+                            view.getPaddingRight(), paddingBottom);
+                }
+
+                @Override
+                public Integer get(View view) {
+                    return view.getPaddingBottom();
+                }
+            };
 
     private static final int DEFAULT_CLOSE_DURATION = 200;
     private ItemInfo mOriginalItemInfo;
@@ -70,14 +88,13 @@ public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
                 R.string.widgets_bottom_sheet_title, mOriginalItemInfo.title));
 
         onWidgetsBound();
-
-        mLauncher.getDragLayer().addView(this);
+        attachToContainer();
         mIsOpen = false;
         animateOpen();
     }
 
     @Override
-    protected void onWidgetsBound() {
+    public void onWidgetsBound() {
         List<WidgetItem> widgets = mLauncher.getPopupDataProvider().getWidgetsForPackageUser(
                 new PackageUserKey(
                         mOriginalItemInfo.getTargetComponent().getPackageName(),
@@ -108,7 +125,7 @@ public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
             // Otherwise, add an empty view to the start as padding (but still scroll edge to edge).
             View leftPaddingView = LayoutInflater.from(getContext()).inflate(
                     R.layout.widget_list_divider, widgetRow, false);
-            leftPaddingView.getLayoutParams().width = Utilities.pxFromDp(
+            leftPaddingView.getLayoutParams().width = ResourceUtils.pxFromDp(
                     16, getResources().getDisplayMetrics());
             widgetCells.addView(leftPaddingView, 0);
         }
@@ -118,7 +135,7 @@ public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
         LayoutInflater.from(getContext()).inflate(R.layout.widget_list_divider, parent, true);
     }
 
-    private WidgetCell addItemCell(ViewGroup parent) {
+    protected WidgetCell addItemCell(ViewGroup parent) {
         WidgetCell widget = (WidgetCell) LayoutInflater.from(getContext()).inflate(
                 R.layout.widget_cell, parent, false);
 
@@ -138,7 +155,7 @@ public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
         setupNavBarColor();
         mOpenCloseAnimator.setValues(
                 PropertyValuesHolder.ofFloat(TRANSLATION_SHIFT, TRANSLATION_SHIFT_OPENED));
-        mOpenCloseAnimator.setInterpolator(Interpolators.FAST_OUT_SLOW_IN);
+        mOpenCloseAnimator.setInterpolator(FAST_OUT_SLOW_IN);
         mOpenCloseAnimator.start();
     }
 
@@ -159,8 +176,7 @@ public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
         int rightInset = insets.right - mInsets.right;
         int bottomInset = insets.bottom - mInsets.bottom;
         mInsets.set(insets);
-        setPadding(getPaddingLeft() + leftInset, getPaddingTop(),
-                getPaddingRight() + rightInset, getPaddingBottom() + bottomInset);
+        setPadding(leftInset, getPaddingTop(), rightInset, bottomInset);
     }
 
     @Override
@@ -172,5 +188,11 @@ public class WidgetsBottomSheet extends BaseWidgetSheet implements Insettable {
     protected Pair<View, String> getAccessibilityTarget() {
         return Pair.create(findViewById(R.id.title),  getContext().getString(
                 mIsOpen ? R.string.widgets_list : R.string.widgets_list_closed));
+    }
+
+    @Override
+    public void addHintCloseAnim(
+            float distanceToMove, Interpolator interpolator, PendingAnimation target) {
+        target.setInt(this, PADDING_BOTTOM, (int) (distanceToMove + mInsets.bottom), interpolator);
     }
 }

@@ -26,7 +26,6 @@ import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.util.Log;
 import android.view.DragEvent;
 import android.view.View;
@@ -36,7 +35,7 @@ import com.android.launcher3.DragSource;
 import com.android.launcher3.DropTarget.DragObject;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
-import com.android.launcher3.states.InternalStateHandler;
+import com.android.launcher3.util.ActivityTracker.SchedulerCallback;
 import com.android.launcher3.widget.PendingItemDragHelper;
 
 import java.util.UUID;
@@ -44,8 +43,8 @@ import java.util.UUID;
 /**
  * {@link DragSource} for handling drop from a different window.
  */
-public abstract class BaseItemDragListener extends InternalStateHandler implements
-        View.OnDragListener, DragSource, DragOptions.PreDragCondition {
+public abstract class BaseItemDragListener implements View.OnDragListener, DragSource,
+        DragOptions.PreDragCondition, SchedulerCallback<Launcher> {
 
     private static final String TAG = "BaseItemDragListener";
 
@@ -63,7 +62,6 @@ public abstract class BaseItemDragListener extends InternalStateHandler implemen
 
     protected Launcher mLauncher;
     private DragController mDragController;
-    private long mDragStartTime;
 
     public BaseItemDragListener(Rect previewRect, int previewBitmapWidth, int previewViewWidth) {
         mPreviewRect = previewRect;
@@ -94,7 +92,7 @@ public abstract class BaseItemDragListener extends InternalStateHandler implemen
             postCleanup();
             return false;
         }
-        if (event.getAction() == DragEvent.ACTION_DRAG_STARTED) {
+        if (event.getAction() == DragEvent.ACTION_DRAG_STARTED || !mDragController.isDragging()) {
             if (onDragStart(event)) {
                 return true;
             } else {
@@ -102,10 +100,14 @@ public abstract class BaseItemDragListener extends InternalStateHandler implemen
                 return false;
             }
         }
-        return mDragController.onDragEvent(mDragStartTime, event);
+        return mDragController.onDragEvent(event);
     }
 
     protected boolean onDragStart(DragEvent event) {
+        return onDragStart(event, this);
+    }
+
+    protected boolean onDragStart(DragEvent event, DragOptions.PreDragCondition preDragCondition) {
         ClipDescription desc =  event.getClipDescription();
         if (desc == null || !desc.hasMimeType(getMimeType())) {
             Log.e(TAG, "Someone started a dragAndDrop before us.");
@@ -114,8 +116,8 @@ public abstract class BaseItemDragListener extends InternalStateHandler implemen
 
         Point downPos = new Point((int) event.getX(), (int) event.getY());
         DragOptions options = new DragOptions();
-        options.systemDndStartPoint = downPos;
-        options.preDragCondition = this;
+        options.simulatedDndStartPoint = downPos;
+        options.preDragCondition = preDragCondition;
 
         // We use drag event position as the screenPos for the preview image. Since mPreviewRect
         // already includes the view position relative to the drag event on the source window,
@@ -123,8 +125,7 @@ public abstract class BaseItemDragListener extends InternalStateHandler implemen
         // across windows, using drag position here give a good estimate for relative position
         // to source window.
         createDragHelper().startDrag(new Rect(mPreviewRect),
-                mPreviewBitmapWidth, mPreviewViewWidth, downPos,  this, options);
-        mDragStartTime = SystemClock.uptimeMillis();
+                mPreviewBitmapWidth, mPreviewViewWidth, downPos, this, options);
         return true;
     }
 
@@ -160,7 +161,6 @@ public abstract class BaseItemDragListener extends InternalStateHandler implemen
     }
 
     protected void postCleanup() {
-        clearReference();
         if (mLauncher != null) {
             // Remove any drag params from the launcher intent since the drag operation is complete.
             Intent newIntent = new Intent(mLauncher.getIntent());

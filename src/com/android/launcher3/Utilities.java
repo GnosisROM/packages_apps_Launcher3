@@ -16,54 +16,75 @@
 
 package com.android.launcher3;
 
+import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_ICON_BADGED;
+
+import android.animation.ValueAnimator;
+import android.annotation.TargetApi;
+import android.app.ActivityManager;
+import android.app.Person;
 import android.app.WallpaperManager;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
+import android.content.pm.ShortcutInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.InsetDrawable;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.DeadObjectException;
 import android.os.Handler;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.TransactionTooLargeException;
+import android.provider.Settings;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.text.style.TtsSpan;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import android.util.Pair;
 import android.util.TypedValue;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.animation.Interpolator;
 
-import com.android.launcher3.config.FeatureFlags;
+import androidx.core.os.BuildCompat;
 
-import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
-import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
+import com.android.launcher3.config.FeatureFlags;
+import com.android.launcher3.dragndrop.FolderAdaptiveIcon;
+import com.android.launcher3.graphics.GridOptionsProvider;
+import com.android.launcher3.graphics.TintedDrawableSpan;
+import com.android.launcher3.icons.IconProvider;
+import com.android.launcher3.icons.LauncherIcons;
+import com.android.launcher3.icons.ShortcutCachingLogic;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.ItemInfoWithIcon;
+import com.android.launcher3.pm.ShortcutConfigActivityInfo;
+import com.android.launcher3.shortcuts.ShortcutKey;
+import com.android.launcher3.shortcuts.ShortcutRequest;
+import com.android.launcher3.util.IntArray;
+import com.android.launcher3.util.PackageManagerHelper;
+import com.android.launcher3.widget.PendingAddShortcutInfo;
+
 import java.lang.reflect.Method;
-import java.util.Collection;
-import java.util.HashSet;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -79,9 +100,15 @@ public final class Utilities {
 
     private static final int[] sLoc0 = new int[2];
     private static final int[] sLoc1 = new int[2];
-    private static final float[] sPoint = new float[2];
     private static final Matrix sMatrix = new Matrix();
     private static final Matrix sInverseMatrix = new Matrix();
+
+    public static final String[] EMPTY_STRING_ARRAY = new String[0];
+    public static final Person[] EMPTY_PERSON_ARRAY = new Person[0];
+
+    public static final boolean ATLEAST_R = BuildCompat.isAtLeastR();
+
+    public static final boolean ATLEAST_Q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
 
     public static final boolean ATLEAST_P =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P;
@@ -92,47 +119,43 @@ public final class Utilities {
     public static final boolean ATLEAST_OREO =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O;
 
-    public static final boolean ATLEAST_NOUGAT_MR1 =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1;
-
-    public static final boolean ATLEAST_NOUGAT =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.N;
-
-    public static final boolean ATLEAST_MARSHMALLOW =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
-
-    public static final boolean ATLEAST_LOLLIPOP_MR1 =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1;
-
-    public static final int SINGLE_FRAME_MS = 16;
+    /**
+     * Set on a motion event dispatched from the nav bar. See {@link MotionEvent#setEdgeFlags(int)}.
+     */
+    public static final int EDGE_NAV_BAR = 1 << 8;
 
     /**
      * Indicates if the device has a debug build. Should only be used to store additional info or
      * add extra logging and not for changing the app behavior.
      */
-    public static final boolean IS_DEBUG_DEVICE = Build.TYPE.toLowerCase().contains("debug")
-            || Build.TYPE.toLowerCase().equals("eng");
+    public static final boolean IS_DEBUG_DEVICE =
+            Build.TYPE.toLowerCase(Locale.ROOT).contains("debug") ||
+            Build.TYPE.toLowerCase(Locale.ROOT).equals("eng");
+
+    public static boolean isDevelopersOptionsEnabled(Context context) {
+        return Settings.Global.getInt(context.getApplicationContext().getContentResolver(),
+                        Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0;
+    }
 
     // An intent extra to indicate the horizontal scroll of the wallpaper.
     public static final String EXTRA_WALLPAPER_OFFSET = "com.android.launcher3.WALLPAPER_OFFSET";
+    public static final String EXTRA_WALLPAPER_FLAVOR = "com.android.launcher3.WALLPAPER_FLAVOR";
 
-    public static final int COLOR_EXTRACTION_JOB_ID = 1;
-    public static final int WALLPAPER_COMPAT_JOB_ID = 2;
+    public static boolean IS_RUNNING_IN_TEST_HARNESS =
+                    ActivityManager.isRunningInTestHarness();
 
-    // These values are same as that in {@link AsyncTask}.
-    private static final int CPU_COUNT = Runtime.getRuntime().availableProcessors();
-    private static final int CORE_POOL_SIZE = CPU_COUNT + 1;
-    private static final int MAXIMUM_POOL_SIZE = CPU_COUNT * 2 + 1;
-    private static final int KEEP_ALIVE = 1;
-    /**
-     * An {@link Executor} to be used with async task with no limit on the queue size.
-     */
-    public static final Executor THREAD_POOL_EXECUTOR = new ThreadPoolExecutor(
-            CORE_POOL_SIZE, MAXIMUM_POOL_SIZE, KEEP_ALIVE,
-            TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
+    public static void enableRunningInTestHarnessForTests() {
+        IS_RUNNING_IN_TEST_HARNESS = true;
+    }
 
     public static boolean isPropertyEnabled(String propertyName) {
         return Log.isLoggable(propertyName, Log.VERBOSE);
+    }
+
+    public static boolean existsStyleWallpapers(Context context) {
+        ResolveInfo ri = context.getPackageManager().resolveActivity(
+                PackageManagerHelper.getStyleWallpapersIntent(context), 0);
+        return ri != null;
     }
 
     /**
@@ -149,37 +172,51 @@ public final class Utilities {
      *         assumption fails, we will need to return a pair of scale factors.
      */
     public static float getDescendantCoordRelativeToAncestor(
-            View descendant, View ancestor, int[] coord, boolean includeRootScroll) {
-        sPoint[0] = coord[0];
-        sPoint[1] = coord[1];
+            View descendant, View ancestor, float[] coord, boolean includeRootScroll) {
+        return getDescendantCoordRelativeToAncestor(descendant, ancestor, coord, includeRootScroll,
+                false);
+    }
 
+    /**
+     * Given a coordinate relative to the descendant, find the coordinate in a parent view's
+     * coordinates.
+     *
+     * @param descendant The descendant to which the passed coordinate is relative.
+     * @param ancestor The root view to make the coordinates relative to.
+     * @param coord The coordinate that we want mapped.
+     * @param includeRootScroll Whether or not to account for the scroll of the descendant:
+     *          sometimes this is relevant as in a child's coordinates within the descendant.
+     * @param ignoreTransform If true, view transform is ignored
+     * @return The factor by which this descendant is scaled relative to this DragLayer. Caution
+     *         this scale factor is assumed to be equal in X and Y, and so if at any point this
+     *         assumption fails, we will need to return a pair of scale factors.
+     */
+    public static float getDescendantCoordRelativeToAncestor(View descendant, View ancestor,
+            float[] coord, boolean includeRootScroll, boolean ignoreTransform) {
         float scale = 1.0f;
         View v = descendant;
         while(v != ancestor && v != null) {
             // For TextViews, scroll has a meaning which relates to the text position
             // which is very strange... ignore the scroll.
             if (v != descendant || includeRootScroll) {
-                sPoint[0] -= v.getScrollX();
-                sPoint[1] -= v.getScrollY();
+                offsetPoints(coord, -v.getScrollX(), -v.getScrollY());
             }
 
-            v.getMatrix().mapPoints(sPoint);
-            sPoint[0] += v.getLeft();
-            sPoint[1] += v.getTop();
+            if (!ignoreTransform) {
+                v.getMatrix().mapPoints(coord);
+            }
+            offsetPoints(coord, v.getLeft(), v.getTop());
             scale *= v.getScaleX();
 
             v = (View) v.getParent();
         }
-
-        coord[0] = Math.round(sPoint[0]);
-        coord[1] = Math.round(sPoint[1]);
         return scale;
     }
 
     /**
-     * Inverse of {@link #getDescendantCoordRelativeToAncestor(View, View, int[], boolean)}.
+     * Inverse of {@link #getDescendantCoordRelativeToAncestor(View, View, float[], boolean)}.
      */
-    public static void mapCoordInSelfToDescendant(View descendant, View root, int[] coord) {
+    public static void mapCoordInSelfToDescendant(View descendant, View root, float[] coord) {
         sMatrix.reset();
         View v = descendant;
         while(v != root) {
@@ -190,12 +227,23 @@ public final class Utilities {
         }
         sMatrix.postTranslate(-v.getScrollX(), -v.getScrollY());
         sMatrix.invert(sInverseMatrix);
+        sInverseMatrix.mapPoints(coord);
+    }
 
-        sPoint[0] = coord[0];
-        sPoint[1] = coord[1];
-        sInverseMatrix.mapPoints(sPoint);
-        coord[0] = Math.round(sPoint[0]);
-        coord[1] = Math.round(sPoint[1]);
+    /**
+     * Sets {@param out} to be same as {@param in} by rounding individual values
+     */
+    public static void roundArray(float[] in, int[] out) {
+       for (int i = 0; i < in.length; i++) {
+           out[i] = Math.round(in[i]);
+       }
+    }
+
+    public static void offsetPoints(float[] points, float offsetX, float offsetY) {
+        for (int i = 0; i < points.length; i += 2) {
+            points[i] += offsetX;
+            points[i + 1] += offsetY;
+        }
     }
 
     /**
@@ -288,78 +336,40 @@ public final class Utilities {
             Log.e(TAG, "mapToRange: range has 0 length");
             return toMin;
         }
-        float progress = Math.abs(t - fromMin) / Math.abs(fromMax - fromMin);
+        float progress = getProgress(t, fromMin, fromMax);
         return mapRange(interpolator.getInterpolation(progress), toMin, toMax);
+    }
+
+    public static float getProgress(float current, float min, float max) {
+        return Math.abs(current - min) / Math.abs(max - min);
     }
 
     public static float mapRange(float value, float min, float max) {
         return min + (value * (max - min));
     }
 
-    public static boolean isSystemApp(Context context, Intent intent) {
-        PackageManager pm = context.getPackageManager();
-        ComponentName cn = intent.getComponent();
-        String packageName = null;
-        if (cn == null) {
-            ResolveInfo info = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
-            if ((info != null) && (info.activityInfo != null)) {
-                packageName = info.activityInfo.packageName;
-            }
-        } else {
-            packageName = cn.getPackageName();
-        }
-        if (packageName != null) {
-            try {
-                PackageInfo info = pm.getPackageInfo(packageName, 0);
-                return (info != null) && (info.applicationInfo != null) &&
-                        ((info.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0);
-            } catch (NameNotFoundException e) {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-
-    /*
-     * Finds a system apk which had a broadcast receiver listening to a particular action.
-     * @param action intent action used to find the apk
-     * @return a pair of apk package name and the resources.
+    /**
+     * Bounds parameter to the range [0, 1]
      */
-    static Pair<String, Resources> findSystemApk(String action, PackageManager pm) {
-        final Intent intent = new Intent(action);
-        for (ResolveInfo info : pm.queryBroadcastReceivers(intent, 0)) {
-            if (info.activityInfo != null &&
-                    (info.activityInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
-                final String packageName = info.activityInfo.packageName;
-                try {
-                    final Resources res = pm.getResourcesForApplication(packageName);
-                    return Pair.create(packageName, res);
-                } catch (NameNotFoundException e) {
-                    Log.w(TAG, "Failed to find resources for " + packageName);
-                }
-            }
-        }
-        return null;
+    public static float saturate(float a) {
+        return boundToRange(a, 0, 1.0f);
     }
 
     /**
-     * Compresses the bitmap to a byte array for serialization.
+     * Returns the compliment (1 - a) of the parameter.
      */
-    public static byte[] flattenBitmap(Bitmap bitmap) {
-        // Try go guesstimate how much space the icon will take when serialized
-        // to avoid unnecessary allocations/copies during the write.
-        int size = bitmap.getWidth() * bitmap.getHeight() * 4;
-        ByteArrayOutputStream out = new ByteArrayOutputStream(size);
-        try {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-            out.flush();
-            out.close();
-            return out.toByteArray();
-        } catch (IOException e) {
-            Log.w(TAG, "Could not write bitmap");
-            return null;
-        }
+    public static float comp(float a) {
+        return 1 - a;
+    }
+
+    /**
+     * Returns the "probabilistic or" of a and b. (a + b - ab).
+     * Useful beyond probability, can be used to combine two unit progresses for example.
+     */
+    public static float or(float a, float b) {
+        float satA = saturate(a);
+        float satB = saturate(b);
+        return satA + satB - (satA * satB);
     }
 
     /**
@@ -386,66 +396,22 @@ public final class Utilities {
         return (int) Math.ceil(fm.bottom - fm.top);
     }
 
-    /**
-     * Convenience println with multiple args.
-     */
-    public static void println(String key, Object... args) {
-        StringBuilder b = new StringBuilder();
-        b.append(key);
-        b.append(": ");
-        boolean isFirstArgument = true;
-        for (Object arg : args) {
-            if (isFirstArgument) {
-                isFirstArgument = false;
-            } else {
-                b.append(", ");
-            }
-            b.append(arg);
-        }
-        System.out.println(b.toString());
-    }
-
     public static boolean isRtl(Resources res) {
         return res.getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
     }
 
-    /**
-     * Returns true if the intent is a valid launch intent for a launcher activity of an app.
-     * This is used to identify shortcuts which are different from the ones exposed by the
-     * applications' manifest file.
-     *
-     * @param launchIntent The intent that will be launched when the shortcut is clicked.
-     */
-    public static boolean isLauncherAppTarget(Intent launchIntent) {
-        if (launchIntent != null
-                && Intent.ACTION_MAIN.equals(launchIntent.getAction())
-                && launchIntent.getComponent() != null
-                && launchIntent.getCategories() != null
-                && launchIntent.getCategories().size() == 1
-                && launchIntent.hasCategory(Intent.CATEGORY_LAUNCHER)
-                && TextUtils.isEmpty(launchIntent.getDataString())) {
-            // An app target can either have no extra or have ItemInfo.EXTRA_PROFILE.
-            Bundle extras = launchIntent.getExtras();
-            return extras == null || extras.keySet().isEmpty();
-        }
-        return false;
-    }
-
-    public static float dpiFromPx(int size, DisplayMetrics metrics){
+    public static float dpiFromPx(float size, DisplayMetrics metrics) {
         float densityRatio = (float) metrics.densityDpi / DisplayMetrics.DENSITY_DEFAULT;
         return (size / densityRatio);
     }
-    public static int pxFromDp(float size, DisplayMetrics metrics) {
-        return (int) Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
-                size, metrics));
-    }
+
     public static int pxFromSp(float size, DisplayMetrics metrics) {
         return (int) Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP,
                 size, metrics));
     }
 
-    public static String createDbSelectionQuery(String columnName, Iterable<?> values) {
-        return String.format(Locale.ENGLISH, "%s IN (%s)", columnName, TextUtils.join(", ", values));
+    public static String createDbSelectionQuery(String columnName, IntArray values) {
+        return String.format(Locale.ENGLISH, "%s IN (%s)", columnName, values.toConcatString());
     }
 
     public static boolean isBootCompleted() {
@@ -503,77 +469,48 @@ public final class Utilities {
     }
 
     /**
-     * Replacement for Long.compare() which was added in API level 19.
+     * Prefixes a text with the provided icon
      */
-    public static int longCompare(long lhs, long rhs) {
-        return lhs < rhs ? -1 : (lhs == rhs ? 0 : 1);
+    public static CharSequence prefixTextWithIcon(Context context, int iconRes, CharSequence msg) {
+        // Update the hint to contain the icon.
+        // Prefix the original hint with two spaces. The first space gets replaced by the icon
+        // using span. The second space is used for a singe space character between the hint
+        // and the icon.
+        SpannableString spanned = new SpannableString("  " + msg);
+        spanned.setSpan(new TintedDrawableSpan(context, iconRes),
+                0, 1, Spannable.SPAN_EXCLUSIVE_INCLUSIVE);
+        return spanned;
     }
 
     public static SharedPreferences getPrefs(Context context) {
-        return context.getSharedPreferences(
+        // Use application context for shared preferences, so that we use a single cached instance
+        return context.getApplicationContext().getSharedPreferences(
                 LauncherFiles.SHARED_PREFERENCES_KEY, Context.MODE_PRIVATE);
     }
 
     public static SharedPreferences getDevicePrefs(Context context) {
-        return context.getSharedPreferences(
+        // Use application context for shared preferences, so that we use a single cached instance
+        return context.getApplicationContext().getSharedPreferences(
                 LauncherFiles.DEVICE_PREFERENCES_KEY, Context.MODE_PRIVATE);
     }
 
-    public static boolean isPowerSaverPreventingAnimation(Context context) {
-        if (ATLEAST_P) {
-            // Battery saver mode no longer prevents animations.
-            return false;
-        }
-        PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        return powerManager.isPowerSaveMode();
+    /**
+     * @return {@link SharedPreferences} that backs {@link FeatureFlags}
+     */
+    public static SharedPreferences getFeatureFlagsPrefs(Context context) {
+        // Use application context for shared preferences, so that we use a single cached instance
+        return context.getApplicationContext().getSharedPreferences(
+            FeatureFlags.FLAGS_PREF_NAME, Context.MODE_PRIVATE);
+    }
+
+    public static boolean areAnimationsEnabled(Context context) {
+        return ATLEAST_OREO
+                ? ValueAnimator.areAnimatorsEnabled()
+                : !context.getSystemService(PowerManager.class).isPowerSaveMode();
     }
 
     public static boolean isWallpaperAllowed(Context context) {
-        if (ATLEAST_NOUGAT) {
-            try {
-                WallpaperManager wm = context.getSystemService(WallpaperManager.class);
-                return (Boolean) wm.getClass().getDeclaredMethod("isSetWallpaperAllowed")
-                        .invoke(wm);
-            } catch (Exception e) { }
-        }
-        return true;
-    }
-
-    public static void closeSilently(Closeable c) {
-        if (c != null) {
-            try {
-                c.close();
-            } catch (IOException e) {
-                if (FeatureFlags.IS_DOGFOOD_BUILD) {
-                    Log.d(TAG, "Error closing", e);
-                }
-            }
-        }
-    }
-
-    /**
-     * Returns true if {@param original} contains all entries defined in {@param updates} and
-     * have the same value.
-     * The comparison uses {@link Object#equals(Object)} to compare the values.
-     */
-    public static boolean containsAll(Bundle original, Bundle updates) {
-        for (String key : updates.keySet()) {
-            Object value1 = updates.get(key);
-            Object value2 = original.get(key);
-            if (value1 == null) {
-                if (value2 != null) {
-                    return false;
-                }
-            } else if (!value1.equals(value2)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** Returns whether the collection is null or empty. */
-    public static boolean isEmpty(Collection c) {
-        return c == null || c.isEmpty();
+        return context.getSystemService(WallpaperManager.class).isSetWallpaperAllowed();
     }
 
     public static boolean isBinderSizeError(Exception e) {
@@ -581,33 +518,40 @@ public final class Utilities {
                 || e.getCause() instanceof DeadObjectException;
     }
 
-    public static <T> T getOverrideObject(Class<T> clazz, Context context, int resId) {
-        String className = context.getString(resId);
-        if (!TextUtils.isEmpty(className)) {
-            try {
-                Class<?> cls = Class.forName(className);
-                return (T) cls.getDeclaredConstructor(Context.class).newInstance(context);
-            } catch (ClassNotFoundException | InstantiationException | IllegalAccessException
-                    | ClassCastException | NoSuchMethodException | InvocationTargetException e) {
-                Log.e(TAG, "Bad overriden class", e);
-            }
-        }
-
-        try {
-            return clazz.newInstance();
-        } catch (InstantiationException|IllegalAccessException e) {
-            throw new RuntimeException(e);
-        }
+    public static boolean isGridOptionsEnabled(Context context) {
+        return isComponentEnabled(context.getPackageManager(),
+                context.getPackageName(),
+                GridOptionsProvider.class.getName());
     }
 
-    /**
-     * Returns a HashSet with a single element. We use this instead of Collections.singleton()
-     * because HashSet ensures all operations, such as remove, are supported.
-     */
-    public static <T> HashSet<T> singletonHashSet(T elem) {
-        HashSet<T> hashSet = new HashSet<>(1);
-        hashSet.add(elem);
-        return hashSet;
+    private static boolean isComponentEnabled(PackageManager pm, String pkgName, String clsName) {
+        ComponentName componentName = new ComponentName(pkgName, clsName);
+        int componentEnabledSetting = pm.getComponentEnabledSetting(componentName);
+
+        switch (componentEnabledSetting) {
+            case PackageManager.COMPONENT_ENABLED_STATE_DISABLED:
+                return false;
+            case PackageManager.COMPONENT_ENABLED_STATE_ENABLED:
+                return true;
+            case PackageManager.COMPONENT_ENABLED_STATE_DEFAULT:
+            default:
+                // We need to get the application info to get the component's default state
+                try {
+                    PackageInfo packageInfo = pm.getPackageInfo(pkgName,
+                            PackageManager.GET_PROVIDERS | PackageManager.GET_DISABLED_COMPONENTS);
+
+                    if (packageInfo.providers != null) {
+                        return Arrays.stream(packageInfo.providers).anyMatch(
+                                pi -> pi.name.equals(clsName) && pi.isEnabled());
+                    }
+
+                    // the component is not declared in the AndroidManifest
+                    return false;
+                } catch (PackageManager.NameNotFoundException e) {
+                    // the package isn't installed on the device
+                    return false;
+                }
+        }
     }
 
     /**
@@ -617,5 +561,134 @@ public final class Utilities {
         Message msg = Message.obtain(handler, callback);
         msg.setAsynchronous(true);
         handler.sendMessage(msg);
+    }
+
+    /**
+     * Parses a string encoded using {@link #getPointString(int, int)}
+     */
+    public static Point parsePoint(String point) {
+        String[] split = point.split(",");
+        return new Point(Integer.parseInt(split[0]), Integer.parseInt(split[1]));
+    }
+
+    /**
+     * Encodes a point to string to that it can be persisted atomically.
+     */
+    public static String getPointString(int x, int y) {
+        return String.format(Locale.ENGLISH, "%d,%d", x, y);
+    }
+
+    public static void unregisterReceiverSafely(Context context, BroadcastReceiver receiver) {
+        try {
+            context.unregisterReceiver(receiver);
+        } catch (IllegalArgumentException e) {}
+    }
+
+    /**
+     * Returns the full drawable for info without any flattening or pre-processing.
+     *
+     * @param outObj this is set to the internal data associated with {@param info},
+     *               eg {@link LauncherActivityInfo} or {@link ShortcutInfo}.
+     */
+    public static Drawable getFullDrawable(Launcher launcher, ItemInfo info, int width, int height,
+            Object[] outObj) {
+        LauncherAppState appState = LauncherAppState.getInstance(launcher);
+        if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION) {
+            LauncherActivityInfo activityInfo = launcher.getSystemService(LauncherApps.class)
+                    .resolveActivity(info.getIntent(), info.user);
+            outObj[0] = activityInfo;
+            return activityInfo == null ? null : new IconProvider(launcher).getIconForUI(
+                    activityInfo, launcher.getDeviceProfile().inv.fillResIconDpi);
+        } else if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT) {
+            if (info instanceof PendingAddShortcutInfo) {
+                ShortcutConfigActivityInfo activityInfo =
+                        ((PendingAddShortcutInfo) info).activityInfo;
+                outObj[0] = activityInfo;
+                return activityInfo.getFullResIcon(appState.getIconCache());
+            }
+            if (info.getIntent() == null || info.getIntent().getPackage() == null) return null;
+            List<ShortcutInfo> si = ShortcutKey.fromItemInfo(info)
+                    .buildRequest(launcher)
+                    .query(ShortcutRequest.ALL);
+            if (si.isEmpty()) {
+                return null;
+            } else {
+                outObj[0] = si.get(0);
+                return ShortcutCachingLogic.getIcon(launcher, si.get(0),
+                        appState.getInvariantDeviceProfile().fillResIconDpi);
+            }
+        } else if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_FOLDER) {
+            FolderAdaptiveIcon icon = FolderAdaptiveIcon.createFolderAdaptiveIcon(
+                    launcher, info.id, new Point(width, height));
+            if (icon == null) {
+                return null;
+            }
+            outObj[0] = icon;
+            return icon;
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * For apps icons and shortcut icons that have badges, this method creates a drawable that can
+     * later on be rendered on top of the layers for the badges. For app icons, work profile badges
+     * can only be applied. For deep shortcuts, when dragged from the pop up container, there's no
+     * badge. When dragged from workspace or folder, it may contain app AND/OR work profile badge
+     **/
+    @TargetApi(Build.VERSION_CODES.O)
+    public static Drawable getBadge(Launcher launcher, ItemInfo info, Object obj) {
+        LauncherAppState appState = LauncherAppState.getInstance(launcher);
+        int iconSize = appState.getInvariantDeviceProfile().iconBitmapSize;
+        if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT) {
+            boolean iconBadged = (info instanceof ItemInfoWithIcon)
+                    && (((ItemInfoWithIcon) info).runtimeStatusFlags & FLAG_ICON_BADGED) > 0;
+            if ((info.id == ItemInfo.NO_ID && !iconBadged)
+                    || !(obj instanceof ShortcutInfo)) {
+                // The item is not yet added on home screen.
+                return new FixedSizeEmptyDrawable(iconSize);
+            }
+            ShortcutInfo si = (ShortcutInfo) obj;
+            Bitmap badge = LauncherAppState.getInstance(appState.getContext())
+                    .getIconCache().getShortcutInfoBadge(si).icon;
+            float badgeSize = LauncherIcons.getBadgeSizeForIconSize(iconSize);
+            float insetFraction = (iconSize - badgeSize) / iconSize;
+            return new InsetDrawable(new FastBitmapDrawable(badge),
+                    insetFraction, insetFraction, 0, 0);
+        } else if (info.itemType == LauncherSettings.Favorites.ITEM_TYPE_FOLDER) {
+            return ((FolderAdaptiveIcon) obj).getBadge();
+        } else {
+            return launcher.getPackageManager()
+                    .getUserBadgedIcon(new FixedSizeEmptyDrawable(iconSize), info.user);
+        }
+    }
+
+    public static float squaredHypot(float x, float y) {
+        return x * x + y * y;
+    }
+
+    public static float squaredTouchSlop(Context context) {
+        float slop = ViewConfiguration.get(context).getScaledTouchSlop();
+        return slop * slop;
+    }
+
+    private static class FixedSizeEmptyDrawable extends ColorDrawable {
+
+        private final int mSize;
+
+        public FixedSizeEmptyDrawable(int size) {
+            super(Color.TRANSPARENT);
+            mSize = size;
+        }
+
+        @Override
+        public int getIntrinsicHeight() {
+            return mSize;
+        }
+
+        @Override
+        public int getIntrinsicWidth() {
+            return mSize;
+        }
     }
 }

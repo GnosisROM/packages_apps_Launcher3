@@ -16,6 +16,8 @@
 
 package com.android.launcher3.notification;
 
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_NOTIFICATION_LAUNCH_TAP;
+
 import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.PendingIntent;
@@ -30,13 +32,15 @@ import android.view.View;
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherAppState;
+import com.android.launcher3.dot.DotInfo;
 import com.android.launcher3.graphics.IconPalette;
+import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.util.PackageUserKey;
 
 /**
  * An object that contains relevant information from a {@link StatusBarNotification}. This should
  * only be created when we need to show the notification contents on the UI; until then, a
- * {@link com.android.launcher3.badge.BadgeInfo} with only the notification key should
+ * {@link DotInfo} with only the notification key should
  * be passed around, and then this can be constructed using the StatusBarNotification from
  * {@link NotificationListener#getNotificationsForKeys(java.util.List)}.
  */
@@ -50,7 +54,7 @@ public class NotificationInfo implements View.OnClickListener {
     public final boolean autoCancel;
     public final boolean dismissable;
 
-    private int mBadgeIcon;
+    private final ItemInfo mItemInfo;
     private Drawable mIconDrawable;
     private int mIconColor;
     private boolean mIsIconLarge;
@@ -58,17 +62,18 @@ public class NotificationInfo implements View.OnClickListener {
     /**
      * Extracts the data that we need from the StatusBarNotification.
      */
-    public NotificationInfo(Context context, StatusBarNotification statusBarNotification) {
+    public NotificationInfo(Context context, StatusBarNotification statusBarNotification,
+            ItemInfo itemInfo) {
         packageUserKey = PackageUserKey.fromNotification(statusBarNotification);
         notificationKey = statusBarNotification.getKey();
         Notification notification = statusBarNotification.getNotification();
         title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
         text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
 
-        mBadgeIcon = notification.getBadgeIconType();
+        int iconType = notification.getBadgeIconType();
         // Load the icon. Since it is backed by ashmem, we won't copy the entire bitmap
         // into our process as long as we don't touch it and it exists in systemui.
-        Icon icon = mBadgeIcon == Notification.BADGE_ICON_SMALL ? null : notification.getLargeIcon();
+        Icon icon = iconType == Notification.BADGE_ICON_SMALL ? null : notification.getLargeIcon();
         if (icon == null) {
             // Use the small icon.
             icon = notification.getSmallIcon();
@@ -84,11 +89,11 @@ public class NotificationInfo implements View.OnClickListener {
             mIconDrawable = new BitmapDrawable(context.getResources(), LauncherAppState
                     .getInstance(context).getIconCache()
                     .getDefaultIcon(statusBarNotification.getUser()).icon);
-            mBadgeIcon = Notification.BADGE_ICON_NONE;
         }
         intent = notification.contentIntent;
         autoCancel = (notification.flags & Notification.FLAG_AUTO_CANCEL) != 0;
         dismissable = (notification.flags & Notification.FLAG_ONGOING_EVENT) == 0;
+        this.mItemInfo = itemInfo;
     }
 
     @Override
@@ -102,6 +107,8 @@ public class NotificationInfo implements View.OnClickListener {
         try {
             intent.send(null, 0, null, null, null, null, activityOptions);
             launcher.getUserEventDispatcher().logNotificationLaunch(view, intent);
+            launcher.getStatsLogManager().logger().withItemInfo(mItemInfo)
+                    .log(LAUNCHER_NOTIFICATION_LAUNCH_TAP);
         } catch (PendingIntent.CanceledException e) {
             e.printStackTrace();
         }
@@ -124,16 +131,5 @@ public class NotificationInfo implements View.OnClickListener {
         icon.setTintList(null);
         icon.setTint(mIconColor);
         return icon;
-    }
-
-    public boolean isIconLarge() {
-        return mIsIconLarge;
-    }
-
-    public boolean shouldShowIconInBadge() {
-        // If the icon we're using for this notification matches what the Notification
-        // specified should show in the badge, then return true.
-        return mIsIconLarge && mBadgeIcon == Notification.BADGE_ICON_LARGE
-                || !mIsIconLarge && mBadgeIcon == Notification.BADGE_ICON_SMALL;
     }
 }

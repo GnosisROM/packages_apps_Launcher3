@@ -15,6 +15,7 @@
  */
 package com.android.launcher3.widget;
 
+import static com.android.launcher3.icons.GraphicsUtils.setColorAlphaBound;
 import static com.android.launcher3.logging.LoggerUtils.newContainerTarget;
 
 import android.content.Context;
@@ -27,33 +28,54 @@ import android.widget.Toast;
 
 import com.android.launcher3.DragSource;
 import com.android.launcher3.DropTarget.DragObject;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.dragndrop.DragOptions;
-import com.android.launcher3.graphics.ColorScrim;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.popup.PopupDataProvider;
+import com.android.launcher3.testing.TestLogging;
+import com.android.launcher3.testing.TestProtocol;
 import com.android.launcher3.touch.ItemLongClickListener;
+import com.android.launcher3.uioverrides.WallpaperColorInfo;
 import com.android.launcher3.userevent.nano.LauncherLogProto.ContainerType;
 import com.android.launcher3.userevent.nano.LauncherLogProto.Target;
 import com.android.launcher3.util.SystemUiController;
 import com.android.launcher3.util.Themes;
 import com.android.launcher3.views.AbstractSlideInView;
 
+import java.util.ArrayList;
+
 /**
  * Base class for various widgets popup
  */
 abstract class BaseWidgetSheet extends AbstractSlideInView
-        implements OnClickListener, OnLongClickListener, DragSource {
+        implements OnClickListener, OnLongClickListener, DragSource,
+        PopupDataProvider.PopupDataChangeListener {
 
 
     /* Touch handling related member variables. */
     private Toast mWidgetInstructionToast;
 
-    protected final ColorScrim mColorScrim;
-
     public BaseWidgetSheet(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        mColorScrim = ColorScrim.createExtractedColorScrim(this);
+    }
+
+    protected int getScrimColor(Context context) {
+        WallpaperColorInfo colors = WallpaperColorInfo.INSTANCE.get(context);
+        int alpha = context.getResources().getInteger(R.integer.extracted_color_gradient_alpha);
+        return setColorAlphaBound(colors.getSecondaryColor(), alpha);
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        mLauncher.getPopupDataProvider().setChangeListener(this);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        mLauncher.getPopupDataProvider().setChangeListener(null);
     }
 
     @Override
@@ -71,18 +93,15 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
     }
 
     @Override
-    public final boolean onLongClick(View v) {
+    public boolean onLongClick(View v) {
+        TestLogging.recordEvent(TestProtocol.SEQUENCE_MAIN, "Widgets.onLongClick");
+        v.cancelLongPress();
         if (!ItemLongClickListener.canStartDrag(mLauncher)) return false;
 
         if (v instanceof WidgetCell) {
             return beginDraggingWidget((WidgetCell) v);
         }
         return true;
-    }
-
-    protected void setTranslationShift(float translationShift) {
-        super.setTranslationShift(translationShift);
-        mColorScrim.setProgress(1 - mTranslationShift);
     }
 
     private boolean beginDraggingWidget(WidgetCell v) {
@@ -96,7 +115,7 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
         }
 
         int[] loc = new int[2];
-        mLauncher.getDragLayer().getLocationInDragLayer(image, loc);
+        getPopupContainer().getLocationInDragLayer(image, loc);
 
         new PendingItemDragHelper(v).startDrag(
                 image.getBitmapBounds(), image.getBitmap().getWidth(), image.getWidth(),
@@ -119,30 +138,40 @@ abstract class BaseWidgetSheet extends AbstractSlideInView
     }
 
     protected void clearNavBarColor() {
-        mLauncher.getSystemUiController().updateUiState(
+        getSystemUiController().updateUiState(
                 SystemUiController.UI_STATE_WIDGET_BOTTOM_SHEET, 0);
     }
 
     protected void setupNavBarColor() {
-        boolean isSheetDark = Themes.getAttrBoolean(mLauncher, R.attr.isMainColorDark);
-        mLauncher.getSystemUiController().updateUiState(
+        boolean isSheetDark = Themes.getAttrBoolean(getContext(), R.attr.isMainColorDark);
+        getSystemUiController().updateUiState(
                 SystemUiController.UI_STATE_WIDGET_BOTTOM_SHEET,
                 isSheetDark ? SystemUiController.FLAG_DARK_NAV : SystemUiController.FLAG_LIGHT_NAV);
     }
 
     @Override
-    public void fillInLogContainerData(View v, ItemInfo info, Target target, Target targetParent) {
-        targetParent.containerType = ContainerType.WIDGETS;
-        targetParent.cardinality = getElementsRowCount();
+    public void fillInLogContainerData(ItemInfo childInfo, Target child,
+            ArrayList<Target> parents) {
+        Target target = newContainerTarget(ContainerType.WIDGETS);
+        target.cardinality = getElementsRowCount();
+        parents.add(target);
     }
 
     @Override
     public final void logActionCommand(int command) {
-        Target target = newContainerTarget(ContainerType.WIDGETS);
+        Target target = newContainerTarget(getLogContainerType());
         target.cardinality = getElementsRowCount();
         mLauncher.getUserEventDispatcher().logActionCommand(command, target);
     }
 
+    @Override
+    public int getLogContainerType() {
+        return ContainerType.WIDGETS;
+    }
+
     protected abstract int getElementsRowCount();
 
+    protected SystemUiController getSystemUiController() {
+        return mLauncher.getSystemUiController();
+    }
 }

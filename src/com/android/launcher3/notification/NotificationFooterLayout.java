@@ -29,7 +29,6 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
-import com.android.launcher3.LauncherAnimUtils;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.anim.PropertyListBuilder;
@@ -81,17 +80,28 @@ public class NotificationFooterLayout extends FrameLayout {
         int iconSize = res.getDimensionPixelSize(R.dimen.notification_footer_icon_size);
         mIconLayoutParams = new LayoutParams(iconSize, iconSize);
         mIconLayoutParams.gravity = Gravity.CENTER_VERTICAL;
-        // Compute margin start for each icon such that the icons between the first one
-        // and the ellipsis are evenly spaced out.
+        setWidth((int) res.getDimension(R.dimen.bg_popup_item_width));
+        mBackgroundColor = Themes.getAttrColor(context, R.attr.popupColorPrimary);
+    }
+
+
+    /**
+     * Compute margin start for each icon such that the icons between the first one and the ellipsis
+     * are evenly spaced out.
+     */
+    public void setWidth(int width) {
+        if (getLayoutParams() != null) {
+            getLayoutParams().width = width;
+        }
+        Resources res = getResources();
+        int iconSize = res.getDimensionPixelSize(R.dimen.notification_footer_icon_size);
+
         int paddingEnd = res.getDimensionPixelSize(R.dimen.notification_footer_icon_row_padding);
         int ellipsisSpace = res.getDimensionPixelSize(R.dimen.horizontal_ellipsis_offset)
                 + res.getDimensionPixelSize(R.dimen.horizontal_ellipsis_size);
-        int footerWidth = res.getDimensionPixelSize(R.dimen.bg_popup_item_width);
-        int availableIconRowSpace = footerWidth - paddingEnd - ellipsisSpace
+        int availableIconRowSpace = width - paddingEnd - ellipsisSpace
                 - iconSize * MAX_FOOTER_NOTIFICATIONS;
         mIconLayoutParams.setMarginStart(availableIconRowSpace / MAX_FOOTER_NOTIFICATIONS);
-
-        mBackgroundColor = Themes.getAttrColor(context, R.attr.popupColorPrimary);
     }
 
     @Override
@@ -151,15 +161,16 @@ public class NotificationFooterLayout extends FrameLayout {
 
     public void animateFirstNotificationTo(Rect toBounds,
             final IconAnimationEndListener callback) {
-        AnimatorSet animation = LauncherAnimUtils.createAnimatorSet();
+        AnimatorSet animation = new AnimatorSet();
         final View firstNotification = mIconRow.getChildAt(mIconRow.getChildCount() - 1);
 
         Rect fromBounds = sTempRect;
         firstNotification.getGlobalVisibleRect(fromBounds);
         float scale = (float) toBounds.height() / fromBounds.height();
-        Animator moveAndScaleIcon = LauncherAnimUtils.ofPropertyValuesHolder(firstNotification,
-                new PropertyListBuilder().scale(scale).translationY(toBounds.top - fromBounds.top
-                        + (fromBounds.height() * scale - fromBounds.height()) / 2).build());
+        Animator moveAndScaleIcon = new PropertyListBuilder().scale(scale)
+                .translationY(toBounds.top - fromBounds.top
+                        + (fromBounds.height() * scale - fromBounds.height()) / 2)
+                .build(firstNotification);
         moveAndScaleIcon.addListener(new AnimatorListenerAdapter() {
             @Override
             public void onAnimationEnd(Animator animation) {

@@ -28,25 +28,27 @@ import android.view.View.OnLongClickListener;
 import com.android.launcher3.CellLayout;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.DropTarget;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
-import com.android.launcher3.LauncherState;
 import com.android.launcher3.dragndrop.DragController;
 import com.android.launcher3.dragndrop.DragOptions;
 import com.android.launcher3.folder.Folder;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.testing.TestLogging;
+import com.android.launcher3.testing.TestProtocol;
 
 /**
  * Class to handle long-clicks on workspace items and start drag as a result.
  */
 public class ItemLongClickListener {
 
-    public static OnLongClickListener INSTANCE_WORKSPACE =
+    public static final OnLongClickListener INSTANCE_WORKSPACE =
             ItemLongClickListener::onWorkspaceItemLongClick;
 
-    public static OnLongClickListener INSTANCE_ALL_APPS =
+    public static final OnLongClickListener INSTANCE_ALL_APPS =
             ItemLongClickListener::onAllAppsItemLongClick;
 
     private static boolean onWorkspaceItemLongClick(View v) {
+        TestLogging.recordEvent(TestProtocol.SEQUENCE_MAIN, "onWorkspaceItemLongClick");
         Launcher launcher = Launcher.getLauncher(v.getContext());
         if (!canStartDrag(launcher)) return false;
         if (!launcher.isInState(NORMAL) && !launcher.isInState(OVERVIEW)) return false;
@@ -62,7 +64,7 @@ public class ItemLongClickListener {
         if (info.container >= 0) {
             Folder folder = Folder.getOpen(launcher);
             if (folder != null) {
-                if (!folder.getItemsInReadingOrder().contains(v)) {
+                if (!folder.getIconsInReadingOrder().contains(v)) {
                     folder.close(true);
                 } else {
                     folder.startDrag(v, dragOptions);
@@ -76,6 +78,8 @@ public class ItemLongClickListener {
     }
 
     private static boolean onAllAppsItemLongClick(View v) {
+        TestLogging.recordEvent(TestProtocol.SEQUENCE_MAIN, "onAllAppsItemLongClick");
+        v.cancelLongPress();
         Launcher launcher = Launcher.getLauncher(v.getContext());
         if (!canStartDrag(launcher)) return false;
         // When we have exited all apps or are in transition, disregard long clicks

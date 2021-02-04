@@ -56,6 +56,41 @@ message Target {
   optional int32 predictedRank = 15;
   optional TargetExtension extension = 16;
   optional TipType tip_type = 17;
+  optional int32 search_query_length = 18;
+  optional bool is_work_app = 19;
+  optional FromFolderLabelState from_folder_label_state = 20;
+  optional ToFolderLabelState to_folder_label_state = 21;
+
+  // Note: proto does not support duplicate enum values, even if they belong to different enum type.
+  // Hence "FROM" and "TO" prefix added.
+  enum FromFolderLabelState {
+    FROM_FOLDER_LABEL_STATE_UNSPECIFIED = 0;
+    FROM_EMPTY = 1;
+    FROM_CUSTOM = 2;
+    FROM_SUGGESTED = 3;
+  }
+
+  enum ToFolderLabelState {
+    TO_FOLDER_LABEL_STATE_UNSPECIFIED = 0;
+    TO_SUGGESTION0_WITH_VALID_PRIMARY = 1;
+    TO_SUGGESTION1_WITH_VALID_PRIMARY = 2;
+    TO_SUGGESTION1_WITH_EMPTY_PRIMARY = 3;
+    TO_SUGGESTION2_WITH_VALID_PRIMARY = 4;
+    TO_SUGGESTION2_WITH_EMPTY_PRIMARY = 5;
+    TO_SUGGESTION3_WITH_VALID_PRIMARY = 6;
+    TO_SUGGESTION3_WITH_EMPTY_PRIMARY = 7;
+    TO_EMPTY_WITH_VALID_SUGGESTIONS = 8 [deprecated = true];
+    TO_EMPTY_WITH_VALID_PRIMARY = 15;
+    TO_EMPTY_WITH_VALID_SUGGESTIONS_AND_EMPTY_PRIMARY = 16;
+    TO_EMPTY_WITH_EMPTY_SUGGESTIONS = 9;
+    TO_EMPTY_WITH_SUGGESTIONS_DISABLED = 10;
+    TO_CUSTOM_WITH_VALID_SUGGESTIONS = 11 [deprecated = true];
+    TO_CUSTOM_WITH_VALID_PRIMARY = 17;
+    TO_CUSTOM_WITH_VALID_SUGGESTIONS_AND_EMPTY_PRIMARY = 18;
+    TO_CUSTOM_WITH_EMPTY_SUGGESTIONS = 12;
+    TO_CUSTOM_WITH_SUGGESTIONS_DISABLED = 13;
+    UNCHANGED = 14;
+  }
 }
 
 // Used to define what type of item a Target would represent.
@@ -71,6 +106,7 @@ enum ItemType {
   NOTIFICATION = 8;
   TASK = 9;         // Each page of Recents UI (QuickStep)
   WEB_APP = 10;
+  TASK_ICON = 11;
 }
 
 // Used to define what type of container a Target would represent.
@@ -90,7 +126,7 @@ enum ContainerType {
   TASKSWITCHER = 12; // Recents UI Container (QuickStep)
   APP = 13; // Foreground activity is another app (QuickStep)
   TIP = 14; // Onboarding texts (QuickStep)
-  SIDELOADED_LAUNCHER = 15;
+  OTHER_LAUNCHER_APP = 15;
 }
 
 // Used to define what type of control a Target would represent.
@@ -106,12 +142,24 @@ enum ControlType {
   RESIZE_HANDLE = 8;
   VERTICAL_SCROLL = 9;
   HOME_INTENT = 10; // Deprecated, use enum Command instead
-  BACK_BUTTON = 11; // Deprecated, use enum Command instead
+  BACK_BUTTON = 11;
   QUICK_SCRUB_BUTTON = 12;
   CLEAR_ALL_BUTTON = 13;
   CANCEL_TARGET = 14;
   TASK_PREVIEW = 15;
   SPLIT_SCREEN_TARGET = 16;
+  REMOTE_ACTION_SHORTCUT = 17;
+  APP_USAGE_SETTINGS = 18;
+  BACK_GESTURE = 19;
+  UNDO = 20;
+  DISMISS_PREDICTION = 21;
+  HYBRID_HOTSEAT_ACCEPTED = 22;
+  HYBRID_HOTSEAT_CANCELED = 23;
+  OVERVIEW_ACTIONS_SHARE_BUTTON = 24;
+  OVERVIEW_ACTIONS_SCREENSHOT_BUTTON = 25;
+  OVERVIEW_ACTIONS_SELECT_BUTTON = 26;
+  SELECT_MODE_CLOSE_BUTTON = 27;
+  SELECT_MODE_ITEM = 28;
 }
 
 enum TipType {
@@ -120,6 +168,8 @@ enum TipType {
   SWIPE_UP_TEXT = 2;
   QUICK_SCRUB_TEXT = 3;
   PREDICTION_TEXT = 4;
+  DWB_TOAST = 5;
+  HYBRID_HOTSEAT = 6;
 }
 
 // Used to define the action component of the LauncherEvent.
@@ -129,7 +179,8 @@ message Action {
     AUTOMATED = 1;
     COMMAND = 2;
     TIP = 3;
-    // SOFT_KEYBOARD, HARD_KEYBOARD, ASSIST
+    SOFT_KEYBOARD = 4;
+    // HARD_KEYBOARD, ASSIST
   }
 
   enum Touch {
@@ -139,6 +190,7 @@ message Action {
     SWIPE = 3;
     FLING = 4;
     PINCH = 5;
+    SWIPE_NOOP = 6;
   }
 
   enum Direction {
@@ -147,6 +199,8 @@ message Action {
     DOWN = 2;
     LEFT = 3;
     RIGHT = 4;
+    UPRIGHT = 5;
+    UPLEFT = 6;
   }
   enum Command {
     HOME_INTENT = 0;
@@ -184,8 +238,8 @@ message LauncherEvent {
   optional int64 elapsed_container_millis = 5;
   optional int64 elapsed_session_millis = 6;
 
-  optional bool is_in_multi_window_mode = 7;
-  optional bool is_in_landscape_mode = 8;
+  optional bool is_in_multi_window_mode = 7 [deprecated = true];
+  optional bool is_in_landscape_mode = 8 [deprecated = true];
 
   optional LauncherEventExtension extension = 9;
 }

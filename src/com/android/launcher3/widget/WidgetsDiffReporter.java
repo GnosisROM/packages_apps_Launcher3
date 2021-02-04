@@ -16,11 +16,12 @@
 
 package com.android.launcher3.widget;
 
-import android.support.v7.widget.RecyclerView;
 import android.util.Log;
 
-import com.android.launcher3.IconCache;
-import com.android.launcher3.model.PackageItemInfo;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.android.launcher3.icons.IconCache;
+import com.android.launcher3.model.data.PackageItemInfo;
 import com.android.launcher3.widget.WidgetsListAdapter.WidgetListRowEntryComparator;
 
 import java.util.ArrayList;
@@ -136,7 +137,7 @@ public class WidgetsDiffReporter {
     }
 
     private boolean isSamePackageItemInfo(PackageItemInfo curInfo, PackageItemInfo newInfo) {
-        return curInfo.iconBitmap.equals(newInfo.iconBitmap) &&
-                !mIconCache.isDefaultIcon(curInfo.iconBitmap, curInfo.user);
+        return curInfo.bitmap.icon.equals(newInfo.bitmap.icon)
+                && !mIconCache.isDefaultIcon(curInfo.bitmap, curInfo.user);
     }
 }

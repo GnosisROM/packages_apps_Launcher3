@@ -16,38 +16,53 @@
 
 package com.android.launcher3.tapl;
 
-import android.support.test.uiautomator.By;
-import android.support.test.uiautomator.BySelector;
-import android.support.test.uiautomator.UiObject2;
-import android.support.test.uiautomator.Until;
 import android.widget.TextView;
+
+import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.BySelector;
+import androidx.test.uiautomator.UiObject2;
+
+import com.android.launcher3.testing.TestProtocol;
+
+import java.util.regex.Pattern;
 
 /**
  * App icon, whether in all apps or in workspace/
  */
-public final class AppIcon {
-    private final Launcher mLauncher;
-    private final UiObject2 mIcon;
+public final class AppIcon extends Launchable {
 
-    AppIcon(Launcher launcher, UiObject2 icon) {
-        mLauncher = launcher;
-        mIcon = icon;
+    private static final Pattern LONG_CLICK_EVENT = Pattern.compile("onAllAppsItemLongClick");
+
+    AppIcon(LauncherInstrumentation launcher, UiObject2 icon) {
+        super(launcher, icon);
     }
 
-    static BySelector getAppIconSelector(String appName) {
-        return By.clazz(TextView.class).text(appName).pkg(Launcher.LAUNCHER_PKG);
+    static BySelector getAppIconSelector(String appName, LauncherInstrumentation launcher) {
+        return By.clazz(TextView.class).text(appName).pkg(launcher.getLauncherPackageName());
     }
 
     /**
-     * Clicks the icon to launch its app.
+     * Long-clicks the icon to open its menu.
      */
-    public void launch() {
-        mLauncher.assertTrue("Launching an app didn't open a new window: " + mIcon.getText(),
-                mIcon.clickAndWait(Until.newWindow(), Launcher.APP_LAUNCH_TIMEOUT_MS));
-        mLauncher.assertState(Launcher.State.BACKGROUND);
+    public AppIconMenu openMenu() {
+        try (LauncherInstrumentation.Closable e = mLauncher.eventsCheck()) {
+            return new AppIconMenu(mLauncher, mLauncher.clickAndGet(
+                    mObject, "deep_shortcuts_container", LONG_CLICK_EVENT));
+        }
     }
 
-    UiObject2 getIcon() {
-        return mIcon;
+    @Override
+    protected void addExpectedEventsForLongClick() {
+        mLauncher.expectEvent(TestProtocol.SEQUENCE_MAIN, LONG_CLICK_EVENT);
+    }
+
+    @Override
+    protected String getLongPressIndicator() {
+        return "deep_shortcuts_container";
+    }
+
+    @Override
+    protected void expectActivityStartEvents() {
+        mLauncher.expectEvent(TestProtocol.SEQUENCE_MAIN, LauncherInstrumentation.EVENT_START);
     }
 }

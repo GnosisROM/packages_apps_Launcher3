@@ -14,20 +14,21 @@
      limitations under the License.
 -->
 
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+<androidx.preference.PreferenceScreen
+    xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <com.android.launcher3.views.ButtonPreference
+    <com.android.launcher3.settings.NotificationDotsPreference
         android:key="pref_icon_badging"
-        android:title="@string/icon_badging_title"
+        android:title="@string/notification_dots_title"
         android:persistent="false"
         android:widgetLayout="@layout/notification_pref_warning" >
         <intent android:action="android.settings.NOTIFICATION_SETTINGS">
-            <!-- This extra highlights the "Allow icon badges" field in Notification settings -->
+            <!-- This extra highlights the "Allow notification dots" field in Notification settings -->
             <extra
                 android:name=":settings:fragment_args_key"
                 android:value="notification_badging" />
         </intent>
-    </com.android.launcher3.views.ButtonPreference>
+    </com.android.launcher3.settings.NotificationDotsPreference>
 
     <SwitchPreference
         android:key="pref_add_icon_to_home"
@@ -66,3 +67,21 @@
         android:persistent="true" />
 
 </PreferenceScreen>
+        android:key="pref_grid_options"
+        android:title="Enable grid options"
+        android:defaultValue="false"
+        android:persistent="true" />
+
+    <SwitchPreference
+        android:defaultValue="true"
+        android:key="pref_enable_minus_one"
+        android:summary="@string/pref_show_google_now_summary"
+        android:title="@string/title_show_google_app"/>
+
+    <androidx.preference.PreferenceScreen
+        android:key="pref_developer_options"
+        android:persistent="false"
+        android:title="Developer Options"
+        android:fragment="com.android.launcher3.settings.DeveloperOptionsFragment"/>
+
+</androidx.preference.PreferenceScreen>

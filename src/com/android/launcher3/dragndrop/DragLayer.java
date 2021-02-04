@@ -17,6 +17,7 @@
 
 package com.android.launcher3.dragndrop;
 
+import static com.android.launcher3.anim.Interpolators.DEACCEL_1_5;
 import static com.android.launcher3.compat.AccessibilityManagerCompat.sendCustomAccessibilityEvent;
 
 import android.animation.Animator;
@@ -35,7 +36,6 @@ import android.view.View;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
 import android.view.animation.Interpolator;
-import android.widget.TextView;
 
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.CellLayout;
@@ -44,13 +44,10 @@ import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
 import com.android.launcher3.ShortcutAndWidgetContainer;
 import com.android.launcher3.Workspace;
-import com.android.launcher3.anim.Interpolators;
 import com.android.launcher3.folder.Folder;
-import com.android.launcher3.folder.FolderIcon;
-import com.android.launcher3.graphics.ViewScrim;
+import com.android.launcher3.graphics.OverviewScrim;
 import com.android.launcher3.graphics.WorkspaceAndHotseatScrim;
 import com.android.launcher3.keyboard.ViewGroupFocusHelper;
-import com.android.launcher3.uioverrides.UiFactory;
 import com.android.launcher3.util.Thunk;
 import com.android.launcher3.views.BaseDragLayer;
 
@@ -64,17 +61,16 @@ public class DragLayer extends BaseDragLayer<Launcher> {
     public static final int ALPHA_INDEX_OVERLAY = 0;
     public static final int ALPHA_INDEX_LAUNCHER_LOAD = 1;
     public static final int ALPHA_INDEX_TRANSITIONS = 2;
-    public static final int ALPHA_INDEX_SWIPE_UP = 3;
-    private static final int ALPHA_CHANNEL_COUNT = 4;
+    private static final int ALPHA_CHANNEL_COUNT = 3;
 
     public static final int ANIMATION_END_DISAPPEAR = 0;
     public static final int ANIMATION_END_REMAIN_VISIBLE = 2;
 
-    @Thunk DragController mDragController;
+    private DragController mDragController;
 
     // Variables relating to animation of views after drop
     private ValueAnimator mDropAnim = null;
-    private final TimeInterpolator mCubicEaseOutInterpolator = Interpolators.DEACCEL_1_5;
+
     @Thunk DragView mDropView = null;
     @Thunk int mAnchorViewInitialScrollX = 0;
     @Thunk View mAnchorView = null;
@@ -86,7 +82,11 @@ public class DragLayer extends BaseDragLayer<Launcher> {
 
     // Related to adjacent page hints
     private final ViewGroupFocusHelper mFocusIndicatorHelper;
-    private final WorkspaceAndHotseatScrim mScrim;
+    private final WorkspaceAndHotseatScrim mWorkspaceScrim;
+    private final OverviewScrim mOverviewScrim;
+
+    // View that should handle move events
+    private View mMoveTarget;
 
     /**
      * Used to create a new DragLayer from XML.
@@ -102,17 +102,20 @@ public class DragLayer extends BaseDragLayer<Launcher> {
         setChildrenDrawingOrderEnabled(true);
 
         mFocusIndicatorHelper = new ViewGroupFocusHelper(this);
-        mScrim = new WorkspaceAndHotseatScrim(this);
+        mWorkspaceScrim = new WorkspaceAndHotseatScrim(this);
+        mOverviewScrim = new OverviewScrim(this);
     }
 
     public void setup(DragController dragController, Workspace workspace) {
         mDragController = dragController;
-        mScrim.setWorkspace(workspace);
+        mWorkspaceScrim.setWorkspace(workspace);
+        mMoveTarget = workspace;
         recreateControllers();
     }
 
+    @Override
     public void recreateControllers() {
-        mControllers = UiFactory.createTouchControllers(mActivity);
+        mControllers = mActivity.createTouchControllers();
     }
 
     public ViewGroupFocusHelper getFocusIndicatorHelper() {
@@ -122,25 +125,6 @@ public class DragLayer extends BaseDragLayer<Launcher> {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         return mDragController.dispatchKeyEvent(event) || super.dispatchKeyEvent(event);
-    }
-
-    @Override
-    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
-        ViewScrim scrim = ViewScrim.get(child);
-        if (scrim != null) {
-            scrim.draw(canvas, getWidth(), getHeight());
-        }
-        return super.drawChild(canvas, child, drawingTime);
-    }
-
-    @Override
-    protected boolean findActiveController(MotionEvent ev) {
-        if (mActivity.getStateManager().getState().disableInteraction) {
-            // You Shall Not Pass!!!
-            mActiveController = null;
-            return true;
-        }
-        return super.findActiveController(ev);
     }
 
     private boolean isEventOverAccessibleDropTargetBar(MotionEvent ev) {
@@ -233,7 +217,7 @@ public class DragLayer extends BaseDragLayer<Launcher> {
     @Override
     public boolean dispatchUnhandledMove(View focused, int direction) {
         return super.dispatchUnhandledMove(focused, direction)
-                || mDragController.dispatchUnhandledMove(focused, direction);
+                || mMoveTarget.dispatchUnhandledMove(focused, direction);
     }
 
     @Override
@@ -264,58 +248,57 @@ public class DragLayer extends BaseDragLayer<Launcher> {
 
     public void animateViewIntoPosition(DragView dragView, final View child, int duration,
             View anchorView) {
+
         ShortcutAndWidgetContainer parentChildren = (ShortcutAndWidgetContainer) child.getParent();
         CellLayout.LayoutParams lp =  (CellLayout.LayoutParams) child.getLayoutParams();
         parentChildren.measureChild(child);
+        parentChildren.layoutChild(child);
 
-        Rect r = new Rect();
-        getViewRectRelativeToSelf(dragView, r);
+        Rect dragViewBounds = new Rect();
+        getViewRectRelativeToSelf(dragView, dragViewBounds);
+        final int fromX = dragViewBounds.left;
+        final int fromY = dragViewBounds.top;
 
-        int coord[] = new int[2];
+        float coord[] = new float[2];
         float childScale = child.getScaleX();
-        coord[0] = lp.x + (int) (child.getMeasuredWidth() * (1 - childScale) / 2);
-        coord[1] = lp.y + (int) (child.getMeasuredHeight() * (1 - childScale) / 2);
+
+        coord[0] = lp.x + (child.getMeasuredWidth() * (1 - childScale) / 2);
+        coord[1] = lp.y + (child.getMeasuredHeight() * (1 - childScale) / 2);
 
         // Since the child hasn't necessarily been laid out, we force the lp to be updated with
         // the correct coordinates (above) and use these to determine the final location
         float scale = getDescendantCoordRelativeToSelf((View) child.getParent(), coord);
+
         // We need to account for the scale of the child itself, as the above only accounts for
         // for the scale in parents.
         scale *= childScale;
-        int toX = coord[0];
-        int toY = coord[1];
+        int toX = Math.round(coord[0]);
+        int toY = Math.round(coord[1]);
+
         float toScale = scale;
-        if (child instanceof TextView) {
-            TextView tv = (TextView) child;
-            // Account for the source scale of the icon (ie. from AllApps to Workspace, in which
-            // the workspace may have smaller icon bounds).
-            toScale = scale / dragView.getIntrinsicIconScaleFactor();
 
-            // The child may be scaled (always about the center of the view) so to account for it,
-            // we have to offset the position by the scaled size.  Once we do that, we can center
-            // the drag view about the scaled child view.
-            toY += Math.round(toScale * tv.getPaddingTop());
-            toY -= dragView.getMeasuredHeight() * (1 - toScale) / 2;
-            if (dragView.getDragVisualizeOffset() != null) {
-                toY -=  Math.round(toScale * dragView.getDragVisualizeOffset().y);
-            }
+        if (child instanceof DraggableView) {
+            // This code is fairly subtle. Please verify drag and drop is pixel-perfect in a number
+            // of scenarios before modifying (from all apps, from workspace, different grid-sizes,
+            // shortcuts from in and out of Launcher etc).
+            DraggableView d = (DraggableView) child;
+            Rect destRect = new Rect();
+            d.getWorkspaceVisualDragBounds(destRect);
 
-            toX -= (dragView.getMeasuredWidth() - Math.round(scale * child.getMeasuredWidth())) / 2;
-        } else if (child instanceof FolderIcon) {
-            // Account for holographic blur padding on the drag view
-            toY += Math.round(scale * (child.getPaddingTop() - dragView.getDragRegionTop()));
-            toY -= scale * dragView.getBlurSizeOutline() / 2;
-            toY -= (1 - scale) * dragView.getMeasuredHeight() / 2;
-            // Center in the x coordinate about the target's drawable
-            toX -= (dragView.getMeasuredWidth() - Math.round(scale * child.getMeasuredWidth())) / 2;
-        } else {
-            toY -= (Math.round(scale * (dragView.getHeight() - child.getMeasuredHeight()))) / 2;
-            toX -= (Math.round(scale * (dragView.getMeasuredWidth()
-                    - child.getMeasuredWidth()))) / 2;
+            // In most cases this additional scale factor should be a no-op (1). It mainly accounts
+            // for alternate grids where the source and destination icon sizes are different
+            toScale *= ((1f * destRect.width())
+                    / (dragView.getMeasuredWidth() - dragView.getBlurSizeOutline()));
+
+            // This accounts for the offset of the DragView created by scaling it about its
+            // center as it animates into place.
+            float scaleShiftX = dragView.getMeasuredWidth() * (1 - toScale) / 2;
+            float scaleShiftY = dragView.getMeasuredHeight() * (1 - toScale) / 2;
+
+            toX += scale * destRect.left - toScale * dragView.getBlurSizeOutline() / 2 - scaleShiftX;
+            toY += scale * destRect.top - toScale * dragView.getBlurSizeOutline() / 2 - scaleShiftY;
         }
 
-        final int fromX = r.left;
-        final int fromY = r.top;
         child.setVisibility(INVISIBLE);
         Runnable onCompleteRunnable = () -> child.setVisibility(VISIBLE);
         animateViewIntoPosition(dragView, fromX, fromY, toX, toY, 1, 1, 1, toScale, toScale,
@@ -370,7 +353,7 @@ public class DragLayer extends BaseDragLayer<Launcher> {
         if (duration < 0) {
             duration = res.getInteger(R.integer.config_dropAnimMaxDuration);
             if (dist < maxDist) {
-                duration *= mCubicEaseOutInterpolator.getInterpolation(dist / maxDist);
+                duration *= DEACCEL_1_5.getInterpolation(dist / maxDist);
             }
             duration = Math.max(duration, res.getInteger(R.integer.config_dropAnimMinDuration));
         }
@@ -378,7 +361,7 @@ public class DragLayer extends BaseDragLayer<Launcher> {
         // Fall back to cubic ease out interpolator for the animation if none is specified
         TimeInterpolator interpolator = null;
         if (alphaInterpolator == null || motionInterpolator == null) {
-            interpolator = mCubicEaseOutInterpolator;
+            interpolator = DEACCEL_1_5;
         }
 
         // Animate the view
@@ -486,14 +469,14 @@ public class DragLayer extends BaseDragLayer<Launcher> {
     public void onViewAdded(View child) {
         super.onViewAdded(child);
         updateChildIndices();
-        UiFactory.onLauncherStateOrFocusChanged(mActivity);
+        mActivity.onDragLayerHierarchyChanged();
     }
 
     @Override
     public void onViewRemoved(View child) {
         super.onViewRemoved(child);
         updateChildIndices();
-        UiFactory.onLauncherStateOrFocusChanged(mActivity);
+        mActivity.onDragLayerHierarchyChanged();
     }
 
     @Override
@@ -542,24 +525,41 @@ public class DragLayer extends BaseDragLayer<Launcher> {
     @Override
     protected void dispatchDraw(Canvas canvas) {
         // Draw the background below children.
-        mScrim.draw(canvas);
+        mWorkspaceScrim.draw(canvas);
+        mOverviewScrim.updateCurrentScrimmedView(this);
         mFocusIndicatorHelper.draw(canvas);
         super.dispatchDraw(canvas);
+        if (mOverviewScrim.getScrimmedView() == null) {
+            mOverviewScrim.draw(canvas);
+        }
+    }
+
+    @Override
+    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+        if (child == mOverviewScrim.getScrimmedView()) {
+            mOverviewScrim.draw(canvas);
+        }
+        return super.drawChild(canvas, child, drawingTime);
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        mScrim.setSize(w, h);
+        mWorkspaceScrim.setSize(w, h);
     }
 
     @Override
     public void setInsets(Rect insets) {
         super.setInsets(insets);
-        mScrim.onInsetsChanged(insets);
+        mWorkspaceScrim.onInsetsChanged(insets, mAllowSysuiScrims);
+        mOverviewScrim.onInsetsChanged(insets);
     }
 
     public WorkspaceAndHotseatScrim getScrim() {
-        return mScrim;
+        return mWorkspaceScrim;
+    }
+
+    public OverviewScrim getOverviewScrim() {
+        return mOverviewScrim;
     }
 }

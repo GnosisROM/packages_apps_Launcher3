@@ -16,13 +16,21 @@
 
 package com.android.launcher3;
 
+import static android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED;
+
 import android.content.Context;
-import android.support.v7.widget.RecyclerView;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityNodeInfo;
 
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.android.launcher3.compat.AccessibilityManagerCompat;
+import com.android.launcher3.testing.TestProtocol;
+import com.android.launcher3.views.ActivityContext;
 import com.android.launcher3.views.RecyclerViewFastScroller;
 
 
@@ -122,12 +130,12 @@ public abstract class BaseRecyclerView extends RecyclerView  {
      * @param ev MotionEvent in {@param eventSource}
      */
     public boolean shouldContainerScroll(MotionEvent ev, View eventSource) {
-        int[] point = new int[2];
-        point[0] = (int) ev.getX();
-        point[1] = (int) ev.getY();
+        float[] point = new float[2];
+        point[0] = ev.getX();
+        point[1] = ev.getY();
         Utilities.mapCoordInSelfToDescendant(mScrollbar, eventSource, point);
         // IF the MotionEvent is inside the thumb, container should not be pulled down.
-        if (mScrollbar.shouldBlockIntercept(point[0], point[1])) {
+        if (mScrollbar.shouldBlockIntercept((int) point[0], (int) point[1])) {
             return false;
         }
 
@@ -136,7 +144,7 @@ public abstract class BaseRecyclerView extends RecyclerView  {
         if (getCurrentScrollY() == 0) {
             return true;
         }
-        return false;
+        return getAdapter() == null || getAdapter().getItemCount() == 0;
     }
 
     /**
@@ -170,4 +178,29 @@ public abstract class BaseRecyclerView extends RecyclerView  {
      * <p>Override in each subclass of this base class.
      */
     public void onFastScrollCompleted() {}
+
+    @Override
+    public void onScrollStateChanged(int state) {
+        super.onScrollStateChanged(state);
+
+        if (state == SCROLL_STATE_IDLE) {
+            AccessibilityManagerCompat.sendScrollFinishedEventToTest(getContext());
+        }
+    }
+
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        super.onInitializeAccessibilityNodeInfo(info);
+        if (isLayoutSuppressed()) info.setScrollable(false);
+    }
+
+    @Override
+    public void setLayoutFrozen(boolean frozen) {
+        final boolean changing = frozen != isLayoutSuppressed();
+        super.setLayoutFrozen(frozen);
+        if (changing) {
+            ActivityContext.lookupContext(getContext()).getDragLayer()
+                    .sendAccessibilityEvent(TYPE_WINDOW_CONTENT_CHANGED);
+        }
+    }
 }

@@ -16,13 +16,14 @@
 package com.android.launcher3.model;
 
 import android.content.Context;
-import android.support.annotation.WorkerThread;
 import android.util.Log;
 
-import com.android.launcher3.AllAppsList;
+import androidx.annotation.WorkerThread;
+
 import com.android.launcher3.LauncherAppState;
 import com.android.launcher3.LauncherModel;
 import com.android.launcher3.LauncherModel.ModelUpdateTask;
+import com.android.launcher3.model.BgDataModel.Callbacks;
 
 import java.util.concurrent.Executor;
 
@@ -50,7 +51,7 @@ public class ModelPreload implements ModelUpdateTask {
     @Override
     public final void run() {
         mModel.startLoaderForResultsIfNotLoaded(
-                new LoaderResults(mApp, mBgDataModel, mAllAppsList, 0, null));
+                new LoaderResults(mApp, mBgDataModel, mAllAppsList, new Callbacks[0]));
         Log.d(TAG, "Preload completed : " + mModel.isModelLoaded());
         onComplete(mModel.isModelLoaded());
     }

@@ -23,11 +23,11 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction;
 
 import com.android.launcher3.AbstractFloatingView;
-import com.android.launcher3.ItemInfo;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherSettings;
 import com.android.launcher3.R;
-import com.android.launcher3.ShortcutInfo;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.notification.NotificationMainView;
 import com.android.launcher3.shortcuts.DeepShortcutView;
 
@@ -64,9 +64,9 @@ public class ShortcutMenuAccessibilityDelegate extends LauncherAccessibilityDele
             if (!(host.getParent() instanceof DeepShortcutView)) {
                 return false;
             }
-            final ShortcutInfo info = ((DeepShortcutView) host.getParent()).getFinalInfo();
+            final WorkspaceItemInfo info = ((DeepShortcutView) host.getParent()).getFinalInfo();
             final int[] coordinates = new int[2];
-            final long screenId = findSpaceOnWorkspace(item, coordinates);
+            final int screenId = findSpaceOnWorkspace(item, coordinates);
             Runnable onComplete = new Runnable() {
                 @Override
                 public void run() {

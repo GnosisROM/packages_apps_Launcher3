@@ -19,6 +19,9 @@ package com.android.launcher3.graphics;
 import static android.content.Intent.ACTION_SCREEN_OFF;
 import static android.content.Intent.ACTION_USER_PRESENT;
 
+import static com.android.launcher3.config.FeatureFlags.KEYGUARD_ANIMATION;
+import static com.android.launcher3.icons.GraphicsUtils.setColorAlphaBound;
+
 import android.animation.ObjectAnimator;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -34,14 +37,16 @@ import android.graphics.RectF;
 import android.graphics.Region;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
-import android.support.v4.graphics.ColorUtils;
 import android.util.DisplayMetrics;
-import android.util.Property;
+import android.util.FloatProperty;
 import android.view.View;
+import android.view.WindowInsets;
+
+import androidx.core.graphics.ColorUtils;
 
 import com.android.launcher3.CellLayout;
-import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
+import com.android.launcher3.ResourceUtils;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.Workspace;
 import com.android.launcher3.uioverrides.WallpaperColorInfo;
@@ -50,49 +55,39 @@ import com.android.launcher3.util.Themes;
 /**
  * View scrim which draws behind hotseat and workspace
  */
-public class WorkspaceAndHotseatScrim implements
-        View.OnAttachStateChangeListener, WallpaperColorInfo.OnChangeListener {
+public class WorkspaceAndHotseatScrim extends Scrim {
 
-    public static Property<WorkspaceAndHotseatScrim, Float> SCRIM_PROGRESS =
-            new Property<WorkspaceAndHotseatScrim, Float>(Float.TYPE, "scrimProgress") {
-                @Override
-                public Float get(WorkspaceAndHotseatScrim scrim) {
-                    return scrim.mScrimProgress;
-                }
-
-                @Override
-                public void set(WorkspaceAndHotseatScrim scrim, Float value) {
-                    scrim.setScrimProgress(value);
-                }
-            };
-
-    public static Property<WorkspaceAndHotseatScrim, Float> SYSUI_PROGRESS =
-            new Property<WorkspaceAndHotseatScrim, Float>(Float.TYPE, "sysUiProgress") {
+    public static final FloatProperty<WorkspaceAndHotseatScrim> SYSUI_PROGRESS =
+            new FloatProperty<WorkspaceAndHotseatScrim>("sysUiProgress") {
                 @Override
                 public Float get(WorkspaceAndHotseatScrim scrim) {
                     return scrim.mSysUiProgress;
                 }
 
                 @Override
-                public void set(WorkspaceAndHotseatScrim scrim, Float value) {
+                public void setValue(WorkspaceAndHotseatScrim scrim, float value) {
                     scrim.setSysUiProgress(value);
                 }
             };
 
-    private static Property<WorkspaceAndHotseatScrim, Float> SYSUI_ANIM_MULTIPLIER =
-            new Property<WorkspaceAndHotseatScrim, Float>(Float.TYPE, "sysUiAnimMultiplier") {
+    private static final FloatProperty<WorkspaceAndHotseatScrim> SYSUI_ANIM_MULTIPLIER =
+            new FloatProperty<WorkspaceAndHotseatScrim>("sysUiAnimMultiplier") {
                 @Override
                 public Float get(WorkspaceAndHotseatScrim scrim) {
                     return scrim.mSysUiAnimMultiplier;
                 }
 
                 @Override
-                public void set(WorkspaceAndHotseatScrim scrim, Float value) {
+                public void setValue(WorkspaceAndHotseatScrim scrim, float value) {
                     scrim.mSysUiAnimMultiplier = value;
                     scrim.reapplySysUiAlpha();
                 }
             };
 
+    /**
+     * Receiver used to get a signal that the user unlocked their device.
+     * @see KEYGUARD_ANIMATION For proper signal.
+     */
     private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -114,13 +109,9 @@ public class WorkspaceAndHotseatScrim implements
     private static final int ALPHA_MASK_WIDTH_DP = 2;
 
     private final Rect mHighlightRect = new Rect();
-    private final Launcher mLauncher;
-    private final WallpaperColorInfo mWallpaperColorInfo;
-    private final View mRoot;
 
     private Workspace mWorkspace;
 
-    private final boolean mHasSysUiScrim;
     private boolean mDrawTopScrim, mDrawBottomScrim;
 
     private final RectF mFinalMaskRect = new RectF();
@@ -130,11 +121,6 @@ public class WorkspaceAndHotseatScrim implements
 
     private final Drawable mTopScrim;
 
-    private int mFullScrimColor;
-
-    private float mScrimProgress;
-    private int mScrimAlpha = 0;
-
     private float mSysUiProgress = 1;
     private boolean mHideSysUiScrim;
 
@@ -142,23 +128,14 @@ public class WorkspaceAndHotseatScrim implements
     private float mSysUiAnimMultiplier = 1;
 
     public WorkspaceAndHotseatScrim(View view) {
-        mRoot = view;
-        mLauncher = Launcher.getLauncher(view.getContext());
-        mWallpaperColorInfo = WallpaperColorInfo.getInstance(mLauncher);
+        super(view);
 
-        mMaskHeight = Utilities.pxFromDp(ALPHA_MASK_BITMAP_DP,
+        mMaskHeight = ResourceUtils.pxFromDp(ALPHA_MASK_BITMAP_DP,
                 view.getResources().getDisplayMetrics());
+        mTopScrim = Themes.getAttrDrawable(view.getContext(), R.attr.workspaceStatusBarScrim);
+        mBottomMask = mTopScrim == null ? null : createDitheredAlphaMask();
+        mHideSysUiScrim = mTopScrim == null;
 
-        mHasSysUiScrim = !mWallpaperColorInfo.supportsDarkText();
-        if (mHasSysUiScrim) {
-            mTopScrim = Themes.getAttrDrawable(view.getContext(), R.attr.workspaceStatusBarScrim);
-            mBottomMask = createDitheredAlphaMask();
-        } else {
-            mTopScrim = null;
-            mBottomMask = null;
-        }
-
-        view.addOnAttachStateChangeListener(this);
         onExtractedColorsChanged(mWallpaperColorInfo);
     }
 
@@ -173,18 +150,18 @@ public class WorkspaceAndHotseatScrim implements
             mWorkspace.computeScrollWithoutInvalidation();
             CellLayout currCellLayout = mWorkspace.getCurrentDragOverlappingLayout();
             canvas.save();
-            if (currCellLayout != null && currCellLayout != mLauncher.getHotseat().getLayout()) {
+            if (currCellLayout != null && currCellLayout != mLauncher.getHotseat()) {
                 // Cut a hole in the darkening scrim on the page that should be highlighted, if any.
                 mLauncher.getDragLayer()
                         .getDescendantRectRelativeToSelf(currCellLayout, mHighlightRect);
                 canvas.clipRect(mHighlightRect, Region.Op.DIFFERENCE);
             }
 
-            canvas.drawColor(ColorUtils.setAlphaComponent(mFullScrimColor, mScrimAlpha));
+            super.draw(canvas);
             canvas.restore();
         }
 
-        if (!mHideSysUiScrim && mHasSysUiScrim) {
+        if (!mHideSysUiScrim) {
             if (mSysUiProgress <= 0) {
                 mAnimateScrimOnNextDraw = false;
                 return;
@@ -194,11 +171,10 @@ public class WorkspaceAndHotseatScrim implements
                 mSysUiAnimMultiplier = 0;
                 reapplySysUiAlphaNoInvalidate();
 
-                ObjectAnimator anim = ObjectAnimator.ofFloat(this, SYSUI_ANIM_MULTIPLIER, 1);
-                anim.setAutoCancel(true);
-                anim.setDuration(600);
-                anim.setStartDelay(mLauncher.getWindow().getTransitionBackgroundFadeDuration());
-                anim.start();
+                ObjectAnimator oa = createSysuiMultiplierAnim(1);
+                oa.setDuration(600);
+                oa.setStartDelay(mLauncher.getWindow().getTransitionBackgroundFadeDuration());
+                oa.start();
                 mAnimateScrimOnNextDraw = false;
             }
 
@@ -211,25 +187,42 @@ public class WorkspaceAndHotseatScrim implements
         }
     }
 
-    public void onInsetsChanged(Rect insets) {
-        mDrawTopScrim = insets.top > 0;
-        mDrawBottomScrim = !mLauncher.getDeviceProfile().isVerticalBarLayout();
+    /**
+     * @return an ObjectAnimator that controls the fade in/out of the sys ui scrim.
+     */
+    public ObjectAnimator createSysuiMultiplierAnim(float... values) {
+        ObjectAnimator anim = ObjectAnimator.ofFloat(this, SYSUI_ANIM_MULTIPLIER, values);
+        anim.setAutoCancel(true);
+        return anim;
     }
 
-    private void setScrimProgress(float progress) {
-        if (mScrimProgress != progress) {
-            mScrimProgress = progress;
-            mScrimAlpha = Math.round(255 * mScrimProgress);
-            invalidate();
+    /**
+     * Determines whether to draw the top and/or bottom scrim based on new insets.
+     */
+    public void onInsetsChanged(Rect insets, boolean allowSysuiScrims) {
+        mDrawTopScrim = allowSysuiScrims
+                && mTopScrim != null
+                && insets.top > 0;
+        mDrawBottomScrim = allowSysuiScrims
+                && mBottomMask != null
+                && !mLauncher.getDeviceProfile().isVerticalBarLayout()
+                && hasBottomNavButtons();
+    }
+
+    private boolean hasBottomNavButtons() {
+        if (Utilities.ATLEAST_Q && mLauncher.getRootView() != null
+                && mLauncher.getRootView().getRootWindowInsets() != null) {
+            WindowInsets windowInsets = mLauncher.getRootView().getRootWindowInsets();
+            return windowInsets.getTappableElementInsets().bottom > 0;
         }
+        return true;
     }
 
     @Override
     public void onViewAttachedToWindow(View view) {
-        mWallpaperColorInfo.addOnChangeListener(this);
-        onExtractedColorsChanged(mWallpaperColorInfo);
+        super.onViewAttachedToWindow(view);
 
-        if (mHasSysUiScrim) {
+        if (!KEYGUARD_ANIMATION.get() && mTopScrim != null) {
             IntentFilter filter = new IntentFilter(ACTION_SCREEN_OFF);
             filter.addAction(ACTION_USER_PRESENT); // When the device wakes up + keyguard is gone
             mRoot.getContext().registerReceiver(mReceiver, filter);
@@ -238,8 +231,8 @@ public class WorkspaceAndHotseatScrim implements
 
     @Override
     public void onViewDetachedFromWindow(View view) {
-        mWallpaperColorInfo.removeOnChangeListener(this);
-        if (mHasSysUiScrim) {
+        super.onViewDetachedFromWindow(view);
+        if (!KEYGUARD_ANIMATION.get() && mTopScrim != null) {
             mRoot.getContext().unregisterReceiver(mReceiver);
         }
     }
@@ -251,25 +244,14 @@ public class WorkspaceAndHotseatScrim implements
         mBottomMaskPaint.setColor(ColorUtils.compositeColors(DARK_SCRIM_COLOR,
                 wallpaperColorInfo.getMainColor()));
         reapplySysUiAlpha();
-        mFullScrimColor = wallpaperColorInfo.getMainColor();
-        if (mScrimAlpha > 0) {
-            invalidate();
-        }
+        super.onExtractedColorsChanged(wallpaperColorInfo);
     }
 
     public void setSize(int w, int h) {
-        if (mHasSysUiScrim) {
+        if (mTopScrim != null) {
             mTopScrim.setBounds(0, 0, w, h);
             mFinalMaskRect.set(0, h - mMaskHeight, w, h);
         }
-    }
-
-    public void hideSysUiScrim(boolean hideSysUiScrim) {
-        mHideSysUiScrim = hideSysUiScrim;
-        if (!hideSysUiScrim) {
-            mAnimateScrimOnNextDraw = true;
-        }
-        invalidate();
     }
 
     private void setSysUiProgress(float progress) {
@@ -280,35 +262,31 @@ public class WorkspaceAndHotseatScrim implements
     }
 
     private void reapplySysUiAlpha() {
-        if (mHasSysUiScrim) {
-            reapplySysUiAlphaNoInvalidate();
-            if (!mHideSysUiScrim) {
-                invalidate();
-            }
+        reapplySysUiAlphaNoInvalidate();
+        if (!mHideSysUiScrim) {
+            invalidate();
         }
     }
 
     private void reapplySysUiAlphaNoInvalidate() {
         float factor = mSysUiProgress * mSysUiAnimMultiplier;
         mBottomMaskPaint.setAlpha(Math.round(MAX_HOTSEAT_SCRIM_ALPHA * factor));
-        mTopScrim.setAlpha(Math.round(255 * factor));
+        if (mTopScrim != null) {
+            mTopScrim.setAlpha(Math.round(255 * factor));
+        }
     }
 
-    public void invalidate() {
-        mRoot.invalidate();
-    }
-
-    public Bitmap createDitheredAlphaMask() {
+    private Bitmap createDitheredAlphaMask() {
         DisplayMetrics dm = mLauncher.getResources().getDisplayMetrics();
-        int width = Utilities.pxFromDp(ALPHA_MASK_WIDTH_DP, dm);
-        int gradientHeight = Utilities.pxFromDp(ALPHA_MASK_HEIGHT_DP, dm);
+        int width = ResourceUtils.pxFromDp(ALPHA_MASK_WIDTH_DP, dm);
+        int gradientHeight = ResourceUtils.pxFromDp(ALPHA_MASK_HEIGHT_DP, dm);
         Bitmap dst = Bitmap.createBitmap(width, mMaskHeight, Bitmap.Config.ALPHA_8);
         Canvas c = new Canvas(dst);
         Paint paint = new Paint(Paint.DITHER_FLAG);
         LinearGradient lg = new LinearGradient(0, 0, 0, gradientHeight,
                 new int[]{
                         0x00FFFFFF,
-                        ColorUtils.setAlphaComponent(Color.WHITE, (int) (0xFF * 0.95)),
+                        setColorAlphaBound(Color.WHITE, (int) (0xFF * 0.95)),
                         0xFFFFFFFF},
                 new float[]{0f, 0.8f, 1f},
                 Shader.TileMode.CLAMP);

@@ -27,17 +27,20 @@ import android.widget.RemoteViews;
 
 import com.android.launcher3.Launcher;
 import com.android.launcher3.R;
+import com.android.launcher3.widget.NavigableAppWidgetHostView;
 
 /**
  * Appwidget host view with QSB specific logic.
  */
-public class QsbWidgetHostView extends AppWidgetHostView {
+public class QsbWidgetHostView extends NavigableAppWidgetHostView {
 
     @ViewDebug.ExportedProperty(category = "launcher")
     private int mPreviousOrientation;
 
     public QsbWidgetHostView(Context context) {
         super(context);
+        setFocusable(true);
+        setBackgroundResource(R.drawable.qsb_host_view_focus_bg);
     }
 
     @Override
@@ -94,5 +97,10 @@ public class QsbWidgetHostView extends AppWidgetHostView {
         v.findViewById(R.id.btn_qsb_search).setOnClickListener((v2) ->
                 Launcher.getLauncher(v2.getContext()).startSearch("", false, null, true));
         return v;
+    }
+
+    @Override
+    protected boolean shouldAllowDirectClick() {
+        return true;
     }
 }

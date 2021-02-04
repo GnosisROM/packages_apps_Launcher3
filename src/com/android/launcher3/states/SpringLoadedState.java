@@ -15,13 +15,10 @@
  */
 package com.android.launcher3.states;
 
-import static com.android.launcher3.LauncherAnimUtils.SPRING_LOADED_TRANSITION_MS;
-import static com.android.launcher3.states.RotationHelper.REQUEST_LOCK;
-
+import android.content.Context;
 import android.graphics.Rect;
 
 import com.android.launcher3.DeviceProfile;
-import com.android.launcher3.InstallShortcutReceiver;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.Workspace;
@@ -32,16 +29,22 @@ import com.android.launcher3.userevent.nano.LauncherLogProto.ContainerType;
  */
 public class SpringLoadedState extends LauncherState {
 
-    private static final int STATE_FLAGS = FLAG_MULTI_PAGE |
-            FLAG_DISABLE_ACCESSIBILITY | FLAG_DISABLE_RESTORE | FLAG_WORKSPACE_ICONS_CAN_BE_DRAGGED |
-            FLAG_DISABLE_PAGE_CLIPPING | FLAG_PAGE_BACKGROUNDS | FLAG_HIDE_BACK_BUTTON;
+    private static final int STATE_FLAGS = FLAG_MULTI_PAGE
+            | FLAG_WORKSPACE_INACCESSIBLE | FLAG_DISABLE_RESTORE
+            | FLAG_WORKSPACE_ICONS_CAN_BE_DRAGGED | FLAG_WORKSPACE_HAS_BACKGROUNDS
+            | FLAG_HIDE_BACK_BUTTON;
 
     public SpringLoadedState(int id) {
-        super(id, ContainerType.OVERVIEW, SPRING_LOADED_TRANSITION_MS, STATE_FLAGS);
+        super(id, ContainerType.WORKSPACE, STATE_FLAGS);
     }
 
     @Override
-    public float[] getWorkspaceScaleAndTranslation(Launcher launcher) {
+    public int getTransitionDuration(Context context) {
+        return 150;
+    }
+
+    @Override
+    public ScaleAndTranslation getWorkspaceScaleAndTranslation(Launcher launcher) {
         DeviceProfile grid = launcher.getDeviceProfile();
         Workspace ws = launcher.getWorkspace();
         if (ws.getChildCount() == 0) {
@@ -50,7 +53,7 @@ public class SpringLoadedState extends LauncherState {
 
         if (grid.isVerticalBarLayout()) {
             float scale = grid.workspaceSpringLoadShrinkFactor;
-            return new float[] {scale, 0, 0};
+            return new ScaleAndTranslation(scale, 0, 0);
         }
 
         float scale = grid.workspaceSpringLoadShrinkFactor;
@@ -69,32 +72,21 @@ public class SpringLoadedState extends LauncherState {
         float myCenter = ws.getTop() + halfHeight;
         float cellTopFromCenter = halfHeight - ws.getChildAt(0).getTop();
         float actualCellTop = myCenter - cellTopFromCenter * scale;
-        return new float[] { scale, 0, (desiredCellTop - actualCellTop) / scale};
+        return new ScaleAndTranslation(scale, 0, (desiredCellTop - actualCellTop) / scale);
     }
 
     @Override
-    public void onStateEnabled(Launcher launcher) {
-        Workspace ws = launcher.getWorkspace();
-        ws.showPageIndicatorAtCurrentScroll();
-        ws.getPageIndicator().setShouldAutoHide(false);
+    protected float getDepthUnchecked(Context context) {
+        return 0.5f;
+    }
 
-        // Prevent any Un/InstallShortcutReceivers from updating the db while we are
-        // in spring loaded mode
-        InstallShortcutReceiver.enableInstallQueue(InstallShortcutReceiver.FLAG_DRAG_AND_DROP);
-        launcher.getRotationHelper().setCurrentStateRequest(REQUEST_LOCK);
+    @Override
+    public ScaleAndTranslation getHotseatScaleAndTranslation(Launcher launcher) {
+        return new ScaleAndTranslation(1, 0, 0);
     }
 
     @Override
     public float getWorkspaceScrimAlpha(Launcher launcher) {
         return 0.3f;
-    }
-
-    @Override
-    public void onStateDisabled(final Launcher launcher) {
-        launcher.getWorkspace().getPageIndicator().setShouldAutoHide(true);
-
-        // Re-enable any Un/InstallShortcutReceiver and now process any queued items
-        InstallShortcutReceiver.disableAndFlushInstallQueue(
-                InstallShortcutReceiver.FLAG_DRAG_AND_DROP, launcher);
     }
 }

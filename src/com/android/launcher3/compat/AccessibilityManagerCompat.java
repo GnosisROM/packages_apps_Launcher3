@@ -17,9 +17,17 @@
 package com.android.launcher3.compat;
 
 import android.content.Context;
+import android.os.Bundle;
+import android.text.TextUtils;
+import android.util.Log;
 import android.view.View;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
+
+import androidx.annotation.Nullable;
+
+import com.android.launcher3.Utilities;
+import com.android.launcher3.testing.TestProtocol;
 
 public class AccessibilityManagerCompat {
 
@@ -32,16 +40,85 @@ public class AccessibilityManagerCompat {
         return isAccessibilityEnabled(context);
     }
 
-    public static void sendCustomAccessibilityEvent(View target, int type, String text) {
-        if (isObservedEventType(target.getContext(), type)) {
+    /**
+     *
+     * @param target The view the accessibility event is initialized on.
+     *               If null, this method has no effect.
+     * @param type See TYPE_ constants defined in {@link AccessibilityEvent}.
+     * @param text Optional text to add to the event, which will be announced to the user.
+     */
+    public static void sendCustomAccessibilityEvent(@Nullable View target, int type,
+            @Nullable String text) {
+        if (target != null && isObservedEventType(target.getContext(), type)) {
             AccessibilityEvent event = AccessibilityEvent.obtain(type);
             target.onInitializeAccessibilityEvent(event);
-            event.getText().add(text);
+            if (!TextUtils.isEmpty(text)) {
+                event.getText().add(text);
+            }
             getManager(target.getContext()).sendAccessibilityEvent(event);
         }
     }
 
     private static AccessibilityManager getManager(Context context) {
         return (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+    }
+
+    public static void sendStateEventToTest(Context context, int stateOrdinal) {
+        final AccessibilityManager accessibilityManager = getAccessibilityManagerForTest(context);
+        if (accessibilityManager == null) return;
+
+        final Bundle parcel = new Bundle();
+        parcel.putInt(TestProtocol.STATE_FIELD, stateOrdinal);
+
+        sendEventToTest(accessibilityManager, TestProtocol.SWITCHED_TO_STATE_MESSAGE, parcel);
+        Log.d(TestProtocol.PERMANENT_DIAG_TAG, "sendStateEventToTest: " + stateOrdinal);
+    }
+
+    public static void sendScrollFinishedEventToTest(Context context) {
+        final AccessibilityManager accessibilityManager = getAccessibilityManagerForTest(context);
+        if (accessibilityManager == null) return;
+
+        sendEventToTest(accessibilityManager, TestProtocol.SCROLL_FINISHED_MESSAGE, null);
+    }
+
+    public static void sendPauseDetectedEventToTest(Context context) {
+        final AccessibilityManager accessibilityManager = getAccessibilityManagerForTest(context);
+        if (accessibilityManager == null) return;
+
+        sendEventToTest(accessibilityManager, TestProtocol.PAUSE_DETECTED_MESSAGE, null);
+    }
+
+    private static void sendEventToTest(
+            AccessibilityManager accessibilityManager, String eventTag, Bundle data) {
+        final AccessibilityEvent e = AccessibilityEvent.obtain(
+                AccessibilityEvent.TYPE_ANNOUNCEMENT);
+        e.setClassName(eventTag);
+        e.setParcelableData(data);
+        accessibilityManager.sendAccessibilityEvent(e);
+    }
+
+    /**
+     * Returns accessibility manager to be used for communication with UI Automation tests.
+     * The tests may exchange custom accessibility messages with the launcher; the accessibility
+     * manager is used in these communications.
+     *
+     * If the launcher runs not under a test, the return is null, and no attempt to process or send
+     * custom accessibility messages should be made.
+     */
+    private static AccessibilityManager getAccessibilityManagerForTest(Context context) {
+        // If not running in a test harness, don't participate in test exchanges.
+        if (!Utilities.IS_RUNNING_IN_TEST_HARNESS) return null;
+
+        final AccessibilityManager accessibilityManager = getManager(context);
+        if (!accessibilityManager.isEnabled()) return null;
+
+        return accessibilityManager;
+    }
+
+    public static int getRecommendedTimeoutMillis(Context context, int originalTimeout, int flags) {
+        if (Utilities.ATLEAST_Q) {
+            return getManager(context).getRecommendedTimeoutMillis(originalTimeout, flags);
+        }
+        return originalTimeout;
     }
 }

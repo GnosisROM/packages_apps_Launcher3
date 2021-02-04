@@ -16,29 +16,33 @@
 
 package com.android.launcher3.popup;
 
+import static com.android.launcher3.LauncherSettings.Favorites.CONTAINER_SHORTCUTS;
+
 import android.content.ComponentName;
+import android.content.pm.ShortcutInfo;
 import android.os.Handler;
 import android.os.UserHandle;
-import android.service.notification.StatusBarNotification;
-import android.support.annotation.Nullable;
-import android.support.annotation.VisibleForTesting;
 
-import com.android.launcher3.ItemInfo;
-import com.android.launcher3.Launcher;
-import com.android.launcher3.ShortcutInfo;
-import com.android.launcher3.graphics.LauncherIcons;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
+import com.android.launcher3.BaseDraggingActivity;
+import com.android.launcher3.LauncherAppState;
+import com.android.launcher3.icons.IconCache;
+import com.android.launcher3.model.data.ItemInfo;
+import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.notification.NotificationInfo;
 import com.android.launcher3.notification.NotificationKeyData;
-import com.android.launcher3.shortcuts.DeepShortcutManager;
+import com.android.launcher3.notification.NotificationListener;
 import com.android.launcher3.shortcuts.DeepShortcutView;
-import com.android.launcher3.shortcuts.ShortcutInfoCompat;
-import com.android.launcher3.util.PackageUserKey;
+import com.android.launcher3.shortcuts.ShortcutRequest;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Contains logic relevant to populating a {@link PopupContainerWithArrow}. In particular,
@@ -53,10 +57,10 @@ public class PopupPopulator {
     /**
      * Sorts shortcuts in rank order, with manifest shortcuts coming before dynamic shortcuts.
      */
-    private static final Comparator<ShortcutInfoCompat> SHORTCUT_RANK_COMPARATOR
-            = new Comparator<ShortcutInfoCompat>() {
+    private static final Comparator<ShortcutInfo> SHORTCUT_RANK_COMPARATOR
+            = new Comparator<ShortcutInfo>() {
         @Override
-        public int compare(ShortcutInfoCompat a, ShortcutInfoCompat b) {
+        public int compare(ShortcutInfo a, ShortcutInfo b) {
             if (a.isDeclaredInManifest() && !b.isDeclaredInManifest()) {
                 return -1;
             }
@@ -75,11 +79,11 @@ public class PopupPopulator {
      * @param shortcutIdToRemoveFirst An id that should be filtered out first, if any.
      * @return a subset of shortcuts, in sorted order, with size <= MAX_SHORTCUTS.
      */
-    public static List<ShortcutInfoCompat> sortAndFilterShortcuts(
-            List<ShortcutInfoCompat> shortcuts, @Nullable String shortcutIdToRemoveFirst) {
+    public static List<ShortcutInfo> sortAndFilterShortcuts(
+            List<ShortcutInfo> shortcuts, @Nullable String shortcutIdToRemoveFirst) {
         // Remove up to one specific shortcut before sorting and doing somewhat fancy filtering.
         if (shortcutIdToRemoveFirst != null) {
-            Iterator<ShortcutInfoCompat> shortcutIterator = shortcuts.iterator();
+            Iterator<ShortcutInfo> shortcutIterator = shortcuts.iterator();
             while (shortcutIterator.hasNext()) {
                 if (shortcutIterator.next().getId().equals(shortcutIdToRemoveFirst)) {
                     shortcutIterator.remove();
@@ -95,11 +99,11 @@ public class PopupPopulator {
 
         // The list of shortcuts is now sorted with static shortcuts followed by dynamic
         // shortcuts. We want to preserve this order, but only keep MAX_SHORTCUTS.
-        List<ShortcutInfoCompat> filteredShortcuts = new ArrayList<>(MAX_SHORTCUTS);
+        List<ShortcutInfo> filteredShortcuts = new ArrayList<>(MAX_SHORTCUTS);
         int numDynamic = 0;
         int size = shortcuts.size();
         for (int i = 0; i < size; i++) {
-            ShortcutInfoCompat shortcut = shortcuts.get(i);
+            ShortcutInfo shortcut = shortcuts.get(i);
             int filteredSize = filteredShortcuts.size();
             if (filteredSize < MAX_SHORTCUTS) {
                 // Always add the first MAX_SHORTCUTS to the filtered list.
@@ -121,46 +125,48 @@ public class PopupPopulator {
         return filteredShortcuts;
     }
 
-    public static Runnable createUpdateRunnable(final Launcher launcher, final ItemInfo originalInfo,
+    /**
+     * Returns a runnable to update the provided shortcuts and notifications
+     */
+    public static Runnable createUpdateRunnable(final BaseDraggingActivity launcher,
+            final ItemInfo originalInfo,
             final Handler uiHandler, final PopupContainerWithArrow container,
-            final List<String> shortcutIds, final List<DeepShortcutView> shortcutViews,
+            final List<DeepShortcutView> shortcutViews,
             final List<NotificationKeyData> notificationKeys) {
         final ComponentName activity = originalInfo.getTargetComponent();
         final UserHandle user = originalInfo.user;
         return () -> {
             if (!notificationKeys.isEmpty()) {
-                List<StatusBarNotification> notifications = launcher.getPopupDataProvider()
-                        .getStatusBarNotificationsForKeys(notificationKeys);
-                List<NotificationInfo> infos = new ArrayList<>(notifications.size());
-                for (int i = 0; i < notifications.size(); i++) {
-                    StatusBarNotification notification = notifications.get(i);
-                    infos.add(new NotificationInfo(launcher, notification));
+                NotificationListener notificationListener =
+                        NotificationListener.getInstanceIfConnected();
+                final List<NotificationInfo> infos;
+                if (notificationListener == null) {
+                    infos = Collections.emptyList();
+                } else {
+                    infos = notificationListener.getNotificationsForKeys(notificationKeys).stream()
+                            .map(sbn -> new NotificationInfo(launcher, sbn, originalInfo))
+                            .collect(Collectors.toList());
                 }
                 uiHandler.post(() -> container.applyNotificationInfos(infos));
             }
 
-            List<ShortcutInfoCompat> shortcuts = DeepShortcutManager.getInstance(launcher)
-                    .queryForShortcutsContainer(activity, shortcutIds, user);
+            List<ShortcutInfo> shortcuts = new ShortcutRequest(launcher, user)
+                    .withContainer(activity)
+                    .query(ShortcutRequest.PUBLISHED);
             String shortcutIdToDeDupe = notificationKeys.isEmpty() ? null
                     : notificationKeys.get(0).shortcutId;
             shortcuts = PopupPopulator.sortAndFilterShortcuts(shortcuts, shortcutIdToDeDupe);
+            IconCache cache = LauncherAppState.getInstance(launcher).getIconCache();
             for (int i = 0; i < shortcuts.size() && i < shortcutViews.size(); i++) {
-                final ShortcutInfoCompat shortcut = shortcuts.get(i);
-                final ShortcutInfo si = new ShortcutInfo(shortcut, launcher);
-                // Use unbadged icon for the menu.
-                LauncherIcons li = LauncherIcons.obtain(launcher);
-                li.createShortcutIcon(shortcut, false /* badged */).applyTo(si);
-                li.recycle();
+                final ShortcutInfo shortcut = shortcuts.get(i);
+                final WorkspaceItemInfo si = new WorkspaceItemInfo(shortcut, launcher);
+                cache.getUnbadgedShortcutIcon(si, shortcut);
                 si.rank = i;
+                si.container = CONTAINER_SHORTCUTS;
 
                 final DeepShortcutView view = shortcutViews.get(i);
                 uiHandler.post(() -> view.applyShortcutInfo(si, shortcut, container));
             }
-
-            // This ensures that mLauncher.getWidgetsForPackageUser()
-            // doesn't return null (it puts all the widgets in memory).
-            uiHandler.post(() -> launcher.refreshAndBindWidgetsForPackageUser(
-                    PackageUserKey.fromItemInfo(originalInfo)));
         };
     }
 }

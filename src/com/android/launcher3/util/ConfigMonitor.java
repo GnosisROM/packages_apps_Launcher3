@@ -16,24 +16,24 @@ package com.android.launcher3.util;
  * limitations under the License.
  */
 
+import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
+
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.graphics.Point;
-import android.hardware.display.DisplayManager;
-import android.hardware.display.DisplayManager.DisplayListener;
-import android.os.Handler;
 import android.util.Log;
-import android.view.Display;
-import android.view.WindowManager;
+
+import java.util.function.Consumer;
 
 /**
  * {@link BroadcastReceiver} which watches configuration changes and
- * restarts the process in case changes which affect the device profile occur.
+ * notifies the callback in case changes which affect the device profile occur.
  */
-public class ConfigMonitor extends BroadcastReceiver implements DisplayListener {
+public class ConfigMonitor extends BroadcastReceiver implements
+        DefaultDisplay.DisplayInfoChangeListener {
 
     private static final String TAG = "ConfigMonitor";
 
@@ -48,75 +48,75 @@ public class ConfigMonitor extends BroadcastReceiver implements DisplayListener 
     private final Point mRealSize;
     private final Point mSmallestSize, mLargestSize;
 
-    public ConfigMonitor(Context context) {
+    private Consumer<Context> mCallback;
+
+    public ConfigMonitor(Context context, Consumer<Context> callback) {
         mContext = context;
 
         Configuration config = context.getResources().getConfiguration();
         mFontScale = config.fontScale;
         mDensity = config.densityDpi;
 
-        Display display = getDefaultDisplay(context);
-        mDisplayId = display.getDisplayId();
+        DefaultDisplay display = DefaultDisplay.INSTANCE.get(context);
+        display.addChangeListener(this);
+        DefaultDisplay.Info displayInfo = display.getInfo();
+        mDisplayId = displayInfo.id;
 
-        mRealSize = new Point();
-        display.getRealSize(mRealSize);
+        mRealSize = new Point(displayInfo.realSize);
+        mSmallestSize = new Point(displayInfo.smallestSize);
+        mLargestSize = new Point(displayInfo.largestSize);
 
-        mSmallestSize = new Point();
-        mLargestSize = new Point();
-        display.getCurrentSizeRange(mSmallestSize, mLargestSize);
+        mCallback = callback;
+
+        // Listen for configuration change
+        mContext.registerReceiver(this, new IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED));
     }
 
     @Override
     public void onReceive(Context context, Intent intent) {
         Configuration config = context.getResources().getConfiguration();
         if (mFontScale != config.fontScale || mDensity != config.densityDpi) {
-            Log.d(TAG, "Configuration changed");
-            killProcess();
+            Log.d(TAG, "Configuration changed.");
+            notifyChange();
         }
     }
 
-    public void register() {
-        mContext.registerReceiver(this, new IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED));
-        mContext.getSystemService(DisplayManager.class)
-                .registerDisplayListener(this, new Handler(UiThreadHelper.getBackgroundLooper()));
-    }
-
     @Override
-    public void onDisplayAdded(int displayId) { }
-
-    @Override
-    public void onDisplayRemoved(int displayId) { }
-
-    @Override
-    public void onDisplayChanged(int displayId) {
-        if (displayId != mDisplayId) {
+    public void onDisplayInfoChanged(DefaultDisplay.Info info, int flags) {
+        if (info.id != mDisplayId) {
             return;
         }
-        Display display = getDefaultDisplay(mContext);
-        display.getRealSize(mTmpPoint1);
-
+        mTmpPoint1.set(info.realSize.x, info.realSize.y);
         if (!mRealSize.equals(mTmpPoint1) && !mRealSize.equals(mTmpPoint1.y, mTmpPoint1.x)) {
             Log.d(TAG, String.format("Display size changed from %s to %s", mRealSize, mTmpPoint1));
-            killProcess();
+            notifyChange();
             return;
         }
 
-        display.getCurrentSizeRange(mTmpPoint1, mTmpPoint2);
+        mTmpPoint1.set(info.smallestSize.x, info.smallestSize.y);
+        mTmpPoint2.set(info.largestSize.x, info.largestSize.y);
         if (!mSmallestSize.equals(mTmpPoint1) || !mLargestSize.equals(mTmpPoint2)) {
             Log.d(TAG, String.format("Available size changed from [%s, %s] to [%s, %s]",
                     mSmallestSize, mLargestSize, mTmpPoint1, mTmpPoint2));
-            killProcess();
+            notifyChange();
         }
     }
 
-    private void killProcess() {
-        Log.d(TAG, "restarting launcher");
-        mContext.unregisterReceiver(this);
-        mContext.getSystemService(DisplayManager.class).unregisterDisplayListener(this);
-        android.os.Process.killProcess(android.os.Process.myPid());
+    private synchronized void notifyChange() {
+        if (mCallback != null) {
+            Consumer<Context> callback = mCallback;
+            mCallback = null;
+            MAIN_EXECUTOR.execute(() -> callback.accept(mContext));
+        }
     }
 
-    private Display getDefaultDisplay(Context context) {
-        return context.getSystemService(WindowManager.class).getDefaultDisplay();
+    public void unregister() {
+        try {
+            mContext.unregisterReceiver(this);
+            DefaultDisplay display = DefaultDisplay.INSTANCE.get(mContext);
+            display.removeChangeListener(this);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to unregister config monitor", e);
+        }
     }
 }
